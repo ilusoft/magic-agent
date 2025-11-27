@@ -27,7 +27,7 @@ A modular web application for designing, testing, and running AI agent workflows
                                           +---------------------------+
 ```
 
-> (*) Real-time updates may be powered by SignalR once run streaming is implemented.
+> (\*) Real-time updates may be powered by SignalR once run streaming is implemented.
 
 ### Core Concepts
 
@@ -39,16 +39,16 @@ A modular web application for designing, testing, and running AI agent workflows
 
 ## Technology Stack
 
-| Layer             | Technology Choices                                                    |
-| ----------------- | --------------------------------------------------------------------- |
-| Frontend          | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui, Zustand (state)* |
-| Backend API       | ASP.NET Core 8 Web API, MediatR*, FluentValidation*, Serilog/Seq*     |
-| Agent Runtime     | .NET Agent Framework (official), Polly for resilience*, BackgroundService |
-| Persistence       | Local JSON files (MVP), optional Postgres/Azure Storage roadmap       |
-| Messaging         | REST + WebSockets/SignalR*                                            |
-| Tooling / DevOps  | pnpm, dotnet CLI, Vitest, xUnit, Playwright*, GitHub Actions*         |
+| Layer            | Technology Choices                                                         |
+| ---------------- | -------------------------------------------------------------------------- |
+| Frontend         | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui, Zustand (state)\*     |
+| Backend API      | ASP.NET Core 8 Web API, MediatR*, FluentValidation*, Serilog/Seq\*         |
+| Agent Runtime    | .NET Agent Framework (official), Polly for resilience\*, BackgroundService |
+| Persistence      | Local JSON files (MVP), optional Postgres/Azure Storage roadmap            |
+| Messaging        | REST + WebSockets/SignalR\*                                                |
+| Tooling / DevOps | pnpm, dotnet CLI, Vitest, xUnit, Playwright*, GitHub Actions*              |
 
-> *Items marked with an asterisk are recommended defaults and can be refined as requirements evolve.
+> \*Items marked with an asterisk are recommended defaults and can be refined as requirements evolve.
 
 ## Repository Layout (proposed)
 
@@ -96,18 +96,24 @@ Agent behavior is driven by JSON definitions persisted under `configs/agents`. A
     },
     "systemPrompt": "You are a helpful code reviewer...",
     "tools": [
-      { "type": "http", "name": "issue-tracker", "baseUrl": "https://jira.example.com" }
+      {
+        "type": "http",
+        "name": "issue-tracker",
+        "baseUrl": "https://jira.example.com"
+      }
     ]
   },
   "workflow": {
     "steps": [
-      { "id": "ingest-pr", "type": "input", "description": "Load pull request diff" },
+      {
+        "id": "ingest-pr",
+        "type": "input",
+        "description": "Load pull request diff"
+      },
       { "id": "analyze", "type": "agent-step", "agent": "code-reviewer" },
       { "id": "summarize", "type": "agent-step", "agent": "summarizer" }
     ],
-    "outputs": [
-      { "id": "report", "type": "markdown" }
-    ]
+    "outputs": [{ "id": "report", "type": "markdown" }]
   },
   "runtime": {
     "maxIterations": 8,
@@ -178,15 +184,15 @@ The agent runtime can connect to [Model Context Protocol (MCP)](https://modelcon
 
 Key properties:
 
-| Field | Required | Notes |
-| --- | --- | --- |
-| `id` | ✅ | Unique tool identifier used in logs. |
-| `type` | ✅ | Use `mcp` (or `mcp-http`) for HTTP/SSE hosted MCP servers. |
-| `serverUrl` | ✅ | Base URL for the MCP server endpoint. Must be HTTP/HTTPS. |
-| `protocol` | ➖ | `auto` (default), `http`/`streamable-http`, or `sse`. |
-| `headers` | ➖ | Key/value pairs forwarded on every MCP request (authenticate with bearer/API keys here). |
-| `allowedTools` | ➖ | Whitelist of remote tool names returned by the MCP server. Filters out any other tools. |
-| `actions` | ➖ | Optional local aliases that customize tool `name`/`description` or map to different MCP tool IDs via the `parameters.tool` property. Useful for renaming tools for the model. |
+| Field          | Required | Notes                                                                                                                                                                         |
+| -------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`           | ✅       | Unique tool identifier used in logs.                                                                                                                                          |
+| `type`         | ✅       | Use `mcp` (or `mcp-http`) for HTTP/SSE hosted MCP servers.                                                                                                                    |
+| `serverUrl`    | ✅       | Base URL for the MCP server endpoint. Must be HTTP/HTTPS.                                                                                                                     |
+| `protocol`     | ➖       | `auto` (default), `http`/`streamable-http`, or `sse`.                                                                                                                         |
+| `headers`      | ➖       | Key/value pairs forwarded on every MCP request (authenticate with bearer/API keys here).                                                                                      |
+| `allowedTools` | ➖       | Whitelist of remote tool names returned by the MCP server. Filters out any other tools.                                                                                       |
+| `actions`      | ➖       | Optional local aliases that customize tool `name`/`description` or map to different MCP tool IDs via the `parameters.tool` property. Useful for renaming tools for the model. |
 
 At runtime, the backend instantiates an MCP `HttpClientTransport`, completes the server handshake, and loads available MCP tools. The selected or aliased tools are then passed to the .NET Agent Framework as `AITool` instances. The frontend Agent Runner lists the configured MCP tools so you can verify connectivity options before running a conversation.
 
@@ -270,22 +276,13 @@ The SPA will proxy API calls to `VITE_API_BASE_URL`. Configure CORS in the backe
 
 ## Deployment Strategy (Roadmap)
 
-| Environment | Deployment Target           | Notes                                      |
-| ----------- | --------------------------- | ------------------------------------------ |
-| Dev         | Local containers / GitHub Codespaces | Rapid iteration, hot reload             |
-| Staging     | Azure App Service + Static Web Apps | Automated CI/CD with integration tests |
-| Production  | Azure App Service / Kubernetes     | Observability via Application Insights   |
+| Environment | Deployment Target                    | Notes                                  |
+| ----------- | ------------------------------------ | -------------------------------------- |
+| Dev         | Local containers / GitHub Codespaces | Rapid iteration, hot reload            |
+| Staging     | Azure App Service + Static Web Apps  | Automated CI/CD with integration tests |
+| Production  | Azure App Service / Kubernetes       | Observability via Application Insights |
 
 Artifacts: docker images for backend, static build for frontend (`pnpm build`).
-
-## Roadmap & Next Steps
-
-1. Scaffold backend API project (`dotnet new webapi`).
-2. Integrate .NET Agent Framework with pluggable JSON loader.
-3. Scaffold frontend with Vite + shadcn/ui base layout.
-4. Implement configuration management endpoints and UI.
-5. Add workflow run execution and streaming updates.
-6. Harden logging, metrics, and deployment pipelines.
 
 ---
 
