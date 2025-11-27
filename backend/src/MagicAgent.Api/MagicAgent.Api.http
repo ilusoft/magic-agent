@@ -1,0 +1,6 @@
+@MagicAgent.Api_HostAddress = http://localhost:5134
+
+GET {{MagicAgent.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

@@ -1,0 +1,141 @@
+{
+  "agents": [
+    {
+      "id": "qualify-pricing-production",
+      "name": "Qualify Pricing Productions",
+      "description": "Agent to assist the qualification of productions",
+      "endpoint": null,
+      "deployment": null,
+      "apiKey": null,
+      "defaultParameters": {},
+      "steps": [
+        {
+          "name": "New Little Step",
+          "type": "chat",
+          "parameters": {},
+          "provider": "azure-openai",
+          "options": {},
+          "conversation": null,
+          "tools": [],
+          "stopOnToolError": false,
+          "inputSource": "usePrevious",
+          "outcomes": [
+            {
+              "name": "to-second",
+              "nextStep": "second step",
+              "condition": null,
+              "endWorkflow": false
+            }
+          ],
+          "isStartStep": false
+        },
+        {
+          "name": "second step",
+          "type": "chat",
+          "parameters": {},
+          "provider": "azure-openai",
+          "options": {},
+          "conversation": null,
+          "tools": [],
+          "stopOnToolError": false,
+          "inputSource": "usePrevious",
+          "outcomes": [
+            {
+              "name": "finito",
+              "nextStep": null,
+              "condition": {
+                "type": "contains",
+                "parameters": {
+                  "value": "something"
+                }
+              },
+              "endWorkflow": true
+            }
+          ],
+          "isStartStep": false
+        },
+        {
+          "name": "Third Step",
+          "type": "chat",
+          "parameters": {},
+          "provider": "azure-openai",
+          "options": {},
+          "conversation": null,
+          "tools": [],
+          "stopOnToolError": false,
+          "inputSource": "usePrevious",
+          "outcomes": [
+            {
+              "name": "default",
+              "nextStep": "New Little Step",
+              "condition": null,
+              "endWorkflow": false
+            },
+            {
+              "name": "maybe",
+              "nextStep": "second step",
+              "condition": {
+                "type": "contains",
+                "parameters": {
+                  "value": "maybe"
+                }
+              },
+              "endWorkflow": false
+            }
+          ],
+          "isStartStep": true
+        }
+      ],
+      "tools": [],
+      "ViewLayout": {
+        "nodes": {
+          "qualify-pricing-production-start": {
+            "x": -25,
+            "y": -313
+          },
+          "qualify-pricing-production-New Little Step": {
+            "x": -311.5,
+            "y": -55
+          },
+          "qualify-pricing-production-second step": {
+            "x": -78,
+            "y": 57
+          },
+          "qualify-pricing-production-termination-finito": {
+            "x": -25,
+            "y": 199
+          },
+          "qualify-pricing-production-Third Step": {
+            "x": -72,
+            "y": -199
+          }
+        },
+        "edges": {
+          "qualify-pricing-production-New Little Step-to-second": {
+            "controlPoints": [
+              {
+                "x": -224,
+                "y": 32
+              }
+            ]
+          },
+          "qualify-pricing-production-Third Step-default": {
+            "controlPoints": [
+              {
+                "x": -224,
+                "y": -112
+              }
+            ]
+          }
+        },
+        "viewport": {
+          "position": {
+            "x": 1149.1420578289421,
+            "y": 633.0177061166506
+          },
+          "zoom": 1.7411011265922474
+        }
+      }
+    }
+  ]
+}
