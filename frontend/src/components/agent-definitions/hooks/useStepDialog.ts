@@ -7,7 +7,13 @@ import type {
   AgentStepDefinition,
   AgentToolDefinition,
 } from "../../../types/agents";
-import type { StepFormState, WorkflowNode } from "../types";
+import {
+  STEP_TYPE_OPTIONS,
+  type StepFormState,
+  type StepType,
+  type WorkflowNode,
+  type KeyValueEntry,
+} from "../types";
 import {
   createKeyValueEntry,
   entriesFromRecord,
@@ -22,6 +28,53 @@ interface UseStepDialogOptions {
   draftDocument: AgentDefinitionsDocument | null;
   activeWorkflowId: string | null;
   applyDocumentUpdate: ApplyDocumentUpdate;
+}
+
+const STEP_TYPE_PARAMETER_TEMPLATES: Record<StepType, string[]> = {
+  chat: ["systemPrompt", "message"],
+  echo: ["message"],
+  "pass-through": [],
+};
+
+const DEFAULT_STEP_TYPE: StepType = "chat";
+
+function coerceStepType(value: string | undefined): StepType {
+  if (value && STEP_TYPE_OPTIONS.includes(value as StepType)) {
+    return value as StepType;
+  }
+
+  return DEFAULT_STEP_TYPE;
+}
+
+function ensureParametersForStepType(
+  type: StepType,
+  currentParameters: KeyValueEntry[]
+): KeyValueEntry[] {
+  const templateKeys = STEP_TYPE_PARAMETER_TEMPLATES[type];
+
+  if (templateKeys.length === 0) {
+    return currentParameters;
+  }
+
+  const existingByKey = new Map(
+    currentParameters.map((entry) => [entry.key, entry])
+  );
+
+  const templateEntries = templateKeys.map((key) => {
+    const existing = existingByKey.get(key);
+
+    if (existing) {
+      return existing;
+    }
+
+    return createKeyValueEntry(key);
+  });
+
+  const extras = currentParameters.filter(
+    (entry) => !templateKeys.includes(entry.key)
+  );
+
+  return [...templateEntries, ...extras];
 }
 
 function renameStepReferences(
@@ -102,7 +155,7 @@ interface StepDialogBindings {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onFieldChange: (
     field: "name" | "type"
-  ) => (event: ChangeEvent<HTMLInputElement>) => void;
+  ) => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void;
   onConversationToggle: (event: ChangeEvent<HTMLInputElement>) => void;
   onAddParameter: () => void;
   onRemoveParameter: (entryId: string) => void;
@@ -197,17 +250,18 @@ export function useStepDialog({
         : undefined;
 
       const parameterEntries = entriesFromRecord(existingStep?.parameters);
-      const ensuredEntries =
-        parameterEntries.length > 0
-          ? parameterEntries
-          : [createKeyValueEntry()];
+      const stepType = coerceStepType(existingStep?.type);
+      const ensuredEntries = ensureParametersForStepType(
+        stepType,
+        parameterEntries
+      );
       const selectedTools = Array.isArray(existingStep?.tools)
         ? existingStep?.tools.filter((toolId) => typeof toolId === "string")
         : [];
 
       setStepForm({
         name: existingStep?.name ?? targetStepName ?? "",
-        type: existingStep?.type ?? "chat",
+        type: stepType,
         conversationEnabled: existingStep?.conversation?.enabled ?? false,
         parameters: ensuredEntries,
         tools: selectedTools,
@@ -222,11 +276,12 @@ export function useStepDialog({
   );
 
   const openForCreation = useCallback(() => {
+    const initialType = DEFAULT_STEP_TYPE;
     setStepForm({
       name: "",
-      type: "chat",
+      type: initialType,
       conversationEnabled: false,
-      parameters: [createKeyValueEntry()],
+      parameters: ensureParametersForStepType(initialType, []),
       tools: [],
     });
     setStepFormError(null);
@@ -237,12 +292,29 @@ export function useStepDialog({
   }, []);
 
   const handleFieldChange = useCallback(
-    (field: "name" | "type") => (event: ChangeEvent<HTMLInputElement>) => {
-      const value = event.target.value;
-      setStepForm((previous) =>
-        previous ? { ...previous, [field]: value } : previous
-      );
-    },
+    (field: "name" | "type") =>
+      (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+        const value = event.target.value;
+        setStepForm((previous) => {
+          if (!previous) {
+            return previous;
+          }
+
+          if (field === "type") {
+            const nextType = coerceStepType(value);
+            return {
+              ...previous,
+              type: nextType,
+              parameters: ensureParametersForStepType(
+                nextType,
+                previous.parameters ?? []
+              ),
+            };
+          }
+
+          return { ...previous, [field]: value };
+        });
+      },
     []
   );
 
@@ -297,7 +369,7 @@ export function useStepDialog({
 
       return {
         ...previous,
-        parameters: remaining.length > 0 ? remaining : [createKeyValueEntry()],
+        parameters: remaining,
       };
     });
   }, []);
@@ -338,7 +410,7 @@ export function useStepDialog({
       }
 
       const trimmedName = stepForm.name.trim();
-      const trimmedType = stepForm.type.trim() || "chat";
+      const stepType = stepForm.type ?? DEFAULT_STEP_TYPE;
 
       if (!trimmedName) {
         setStepFormError("Step name is required.");
@@ -385,7 +457,7 @@ export function useStepDialog({
 
         const updatedStep: AgentStepDefinition = {
           name: trimmedName,
-          type: trimmedType,
+          type: stepType,
           parameters,
           conversation,
           outcomes: outcomes ?? [],

@@ -6,7 +6,7 @@ import {
 
 import { Maximize2 } from "lucide-react";
 import { DialogShell } from "./DialogShell";
-import type { StepFormState } from "./types";
+import { STEP_TYPE_OPTIONS, type StepFormState } from "./types";
 
 interface StepDialogProps {
   open: boolean;
@@ -18,7 +18,7 @@ interface StepDialogProps {
   onSubmit: FormEventHandler<HTMLFormElement>;
   onFieldChange: (
     field: "name" | "type"
-  ) => ChangeEventHandler<HTMLInputElement>;
+  ) => ChangeEventHandler<HTMLInputElement | HTMLSelectElement>;
   onConversationToggle: ChangeEventHandler<HTMLInputElement>;
   onAddParameter: () => void;
   onRemoveParameter: (entryId: string) => void;
@@ -96,13 +96,19 @@ export function StepDialog({
               <label className="text-xs font-semibold uppercase text-foreground/60">
                 Step Type
               </label>
-              <input
-                type="text"
+              <select
                 value={stepForm.type}
                 onChange={onFieldChange("type")}
                 className="rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder="chat, http, etc."
-              />
+              >
+                {STEP_TYPE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option === "pass-through"
+                      ? "Pass-through"
+                      : option.charAt(0).toUpperCase() + option.slice(1)}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <label className="flex items-center gap-2 text-sm text-foreground/80">
@@ -129,50 +135,56 @@ export function StepDialog({
                 </button>
               </div>
 
-              <div className="space-y-2">
-                {stepForm.parameters.map((entry) => (
-                  <div
-                    key={entry.id}
-                    className="grid grid-cols-[1fr_auto_1fr_auto_auto] items-center gap-2"
-                  >
-                    <input
-                      type="text"
-                      value={entry.key}
-                      onChange={onParameterChange(entry.id, "key")}
-                      className="rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                      placeholder="Parameter key"
-                    />
-                    <span className="text-xs uppercase text-foreground/50">
-                      →
-                    </span>
-                    <input
-                      type="text"
-                      value={entry.value}
-                      onChange={onParameterChange(entry.id, "value")}
-                      className="rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                      placeholder="Parameter value"
-                    />
-                    <button
-                      type="button"
-                      className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-xs text-foreground/70 hover:bg-muted"
-                      onClick={() => {
-                        setExpandedParamId(entry.id);
-                        setExpandedParamValue(entry.value ?? "");
-                      }}
-                      title="Expand value editor"
+              {stepForm.parameters.length === 0 ? (
+                <p className="text-sm text-foreground/60">
+                  No parameters defined for this step type.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {stepForm.parameters.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className="grid grid-cols-[1fr_auto_1fr_auto_auto] items-center gap-2"
                     >
-                      <Maximize2 className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-md border border-border px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
-                      onClick={() => onRemoveParameter(entry.id)}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
+                      <input
+                        type="text"
+                        value={entry.key}
+                        onChange={onParameterChange(entry.id, "key")}
+                        className="rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        placeholder="Parameter key"
+                      />
+                      <span className="text-xs uppercase text-foreground/50">
+                        →
+                      </span>
+                      <input
+                        type="text"
+                        value={entry.value}
+                        onChange={onParameterChange(entry.id, "value")}
+                        className="rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        placeholder="Parameter value"
+                      />
+                      <button
+                        type="button"
+                        className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-xs text-foreground/70 hover:bg-muted"
+                        onClick={() => {
+                          setExpandedParamId(entry.id);
+                          setExpandedParamValue(entry.value ?? "");
+                        }}
+                        title="Expand value editor"
+                      >
+                        <Maximize2 className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-md border border-border px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+                        onClick={() => onRemoveParameter(entry.id)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {availableTools.length > 0 ? (

@@ -120,12 +120,12 @@
             },
             {
               "name": "no_results",
-              "nextStep": null,
+              "nextStep": "No results message",
               "condition": {
                 "type": "always",
                 "parameters": {}
               },
-              "endWorkflow": true,
+              "endWorkflow": false,
               "order": 2
             }
           ],
@@ -289,6 +289,29 @@
             }
           ],
           "isStartStep": false
+        },
+        {
+          "name": "No results message",
+          "type": "echo",
+          "parameters": {
+            "message": "No results found for that request. Please provide more details or different criteria for any further research."
+          },
+          "provider": "azure-openai",
+          "options": {},
+          "conversation": null,
+          "tools": [],
+          "stopOnToolError": false,
+          "inputSource": "usePrevious",
+          "outcomes": [
+            {
+              "name": "finish_no_result",
+              "nextStep": null,
+              "condition": null,
+              "endWorkflow": true,
+              "order": 1
+            }
+          ],
+          "isStartStep": false
         }
       ],
       "tools": [
@@ -360,8 +383,8 @@
             "y": -169
           },
           "search-inventory-agent-termination-risk_notified": {
-            "x": -73,
-            "y": 295
+            "x": -105,
+            "y": 279
           },
           "search-inventory-agent-tool-PricingTools": {
             "x": 437,
@@ -428,16 +451,12 @@
             "y": 471
           },
           "search-inventory-agent-Escalate Risk": {
-            "x": -130.5,
-            "y": 121
+            "x": -162.5,
+            "y": 105
           },
           "Escalate Risk": {
-            "x": -130.5,
-            "y": 121
-          },
-          "search-inventory-agent-termination-no_results": {
-            "x": 103,
-            "y": 295
+            "x": -162.5,
+            "y": 105
           },
           "search-inventory-agent-Summarize Creation Task": {
             "x": 568,
@@ -446,6 +465,14 @@
           "search-inventory-agent-termination-finish_creation": {
             "x": 663,
             "y": 471
+          },
+          "search-inventory-agent-termination-finish_no_result": {
+            "x": 39,
+            "y": 471
+          },
+          "search-inventory-agent-No results message": {
+            "x": -39.5,
+            "y": 329
           }
         },
         "edges": {
@@ -456,7 +483,7 @@
                 "y": 47.62105083773979
               },
               {
-                "x": -48,
+                "x": -80,
                 "y": 48
               }
             ]
@@ -465,11 +492,11 @@
             "controlPoints": [
               {
                 "x": 176,
-                "y": 96
+                "y": 80
               },
               {
                 "x": 32,
-                "y": 96
+                "y": 80
               }
             ]
           },
@@ -484,7 +511,7 @@
           "search-inventory-agent-Research Agent-no_results": {
             "controlPoints": [
               {
-                "x": 128,
+                "x": 64,
                 "y": 208
               }
             ]
@@ -556,7 +583,7 @@
           "search-inventory-agent-Escalate Risk-risk_notified": {
             "controlPoints": [
               {
-                "x": -48,
+                "x": -80,
                 "y": 208
               }
             ]
@@ -572,10 +599,10 @@
         },
         "viewport": {
           "position": {
-            "x": 188.90473688093513,
-            "y": 355.06344370137504
+            "x": 243.27155674417645,
+            "y": 354.5086380243556
           },
-          "zoom": 1.2201296079503485
+          "zoom": 1.1983375993212357
         }
       }
     },
