@@ -37,66 +37,98 @@ internal static class StepOutcomeResolver
             .Select(wrapper => wrapper.Outcome)
             .ToList();
 
-        foreach (var outcome in orderedOutcomes)
+        var defaultOutcome = orderedOutcomes.FirstOrDefault(IsDefaultOutcome);
+
+        var conditionalOutcomes = orderedOutcomes
+            .Where(outcome => !IsDefaultOutcome(outcome))
+            .ToList();
+
+        foreach (var outcome in conditionalOutcomes)
         {
             if (!EvaluateOutcomeCondition(definition, currentStep, outcome, normalizedOutput, logger))
             {
                 continue;
             }
 
-            if (outcome.EndWorkflow)
-            {
-                if (!string.IsNullOrWhiteSpace(outcome.NextStep))
-                {
-                    logger.LogWarning(
-                        "Outcome '{OutcomeName}' for agent {AgentId} step {StepName} marks the workflow as complete but specifies next step '{NextStep}'. The next step will be ignored.",
-                        outcome.Name,
-                        definition.Id,
-                        currentStep.Name,
-                        outcome.NextStep);
-                }
+            return ResolveOutcome(definition, stepLookup, currentStep, outcome, logger);
+        }
 
-                return new StepOutcomeResolution(outcome.Name, null, true);
+        if (defaultOutcome is not null)
+        {
+            logger.LogInformation(
+                "No conditional outcomes matched for agent {AgentId} step {StepName}. Applying default outcome '{OutcomeName}'.",
+                definition.Id,
+                currentStep.Name,
+                defaultOutcome.Name);
+
+            return ResolveOutcome(definition, stepLookup, currentStep, defaultOutcome, logger);
+        }
+
+        logger.LogWarning(
+            "No outcomes matched for agent {AgentId} step {StepName} and no default outcome was defined. Workflow will terminate.",
+            definition.Id,
+            currentStep.Name);
+
+        return new StepOutcomeResolution(null, null, true);
+    }
+
+    private static StepOutcomeResolution ResolveOutcome(
+        AgentDefinition definition,
+        IDictionary<string, AgentStepDefinition> stepLookup,
+        AgentStepDefinition currentStep,
+        AgentStepOutcomeDefinition outcome,
+        ILogger logger)
+    {
+        if (outcome.EndWorkflow)
+        {
+            if (!string.IsNullOrWhiteSpace(outcome.NextStep))
+            {
+                logger.LogWarning(
+                    "Outcome '{OutcomeName}' for agent {AgentId} step {StepName} marks the workflow as complete but specifies next step '{NextStep}'. The next step will be ignored.",
+                    outcome.Name,
+                    definition.Id,
+                    currentStep.Name,
+                    outcome.NextStep);
             }
 
-            var requestedNextStep = outcome.NextStep;
-            string? resolvedNextStep;
+            return new StepOutcomeResolution(outcome.Name, null, true);
+        }
 
-            if (!string.IsNullOrWhiteSpace(requestedNextStep))
+        var requestedNextStep = outcome.NextStep;
+        string? resolvedNextStep;
+
+        if (!string.IsNullOrWhiteSpace(requestedNextStep))
+        {
+            if (string.Equals(requestedNextStep, currentStep.Name, StringComparison.OrdinalIgnoreCase))
             {
-                if (string.Equals(requestedNextStep, currentStep.Name, StringComparison.OrdinalIgnoreCase))
-                {
-                    logger.LogWarning(
-                        "Outcome '{OutcomeName}' for agent {AgentId} step {StepName} references the same step and would cause a loop. Execution will stop.",
-                        outcome.Name,
-                        definition.Id,
-                        currentStep.Name);
-                    resolvedNextStep = null;
-                }
-                else if (stepLookup.TryGetValue(requestedNextStep!, out var nextStepDefinition))
-                {
-                    resolvedNextStep = nextStepDefinition.Name;
-                }
-                else
-                {
-                    logger.LogWarning(
-                        "Outcome '{OutcomeName}' for agent {AgentId} step {StepName} references unknown next step '{NextStep}'. Falling back to sequential flow.",
-                        outcome.Name,
-                        definition.Id,
-                        currentStep.Name,
-                        requestedNextStep);
-                    resolvedNextStep = GetSequentialNextStep(definition, currentStep);
-                }
+                logger.LogWarning(
+                    "Outcome '{OutcomeName}' for agent {AgentId} step {StepName} references the same step and would cause a loop. Execution will stop.",
+                    outcome.Name,
+                    definition.Id,
+                    currentStep.Name);
+                resolvedNextStep = null;
+            }
+            else if (stepLookup.TryGetValue(requestedNextStep!, out var nextStepDefinition))
+            {
+                resolvedNextStep = nextStepDefinition.Name;
             }
             else
             {
+                logger.LogWarning(
+                    "Outcome '{OutcomeName}' for agent {AgentId} step {StepName} references unknown next step '{NextStep}'. Falling back to sequential flow.",
+                    outcome.Name,
+                    definition.Id,
+                    currentStep.Name,
+                    requestedNextStep);
                 resolvedNextStep = GetSequentialNextStep(definition, currentStep);
             }
-
-            return new StepOutcomeResolution(outcome.Name, resolvedNextStep, false);
+        }
+        else
+        {
+            resolvedNextStep = GetSequentialNextStep(definition, currentStep);
         }
 
-        return new StepOutcomeResolution(null, GetSequentialNextStep(definition, currentStep), false);
+        return new StepOutcomeResolution(outcome.Name, resolvedNextStep, false);
     }
 
     private static bool EvaluateOutcomeCondition(
@@ -194,6 +226,19 @@ internal static class StepOutcomeResolver
         }
 
         return StringComparison.OrdinalIgnoreCase;
+    }
+
+    private static bool IsDefaultOutcome(AgentStepOutcomeDefinition? outcome)
+    {
+        if (outcome is null)
+        {
+            return false;
+        }
+
+        var conditionType = outcome.Condition?.Type;
+
+        return !string.IsNullOrWhiteSpace(conditionType) &&
+            string.Equals(conditionType.Trim(), "always", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? GetSequentialNextStep(AgentDefinition definition, AgentStepDefinition currentStep)
