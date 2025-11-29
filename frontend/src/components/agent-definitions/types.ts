@@ -98,4 +98,6 @@ export interface WorkflowFormState {
   deployment: string;
   apiKey: string;
   defaultParameters: KeyValueEntry[];
+  streamingEnabled: boolean;
+  streamingMode: string;
 }

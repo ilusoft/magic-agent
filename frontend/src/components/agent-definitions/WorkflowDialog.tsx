@@ -19,6 +19,7 @@ interface WorkflowDialogProps {
     field: "key" | "value"
   ) => ChangeEventHandler<HTMLInputElement>;
   onRemoveDefaultParameter: (entryId: string) => void;
+  onStreamingToggle: (enabled: boolean) => void;
 }
 
 export function WorkflowDialog({
@@ -33,6 +34,7 @@ export function WorkflowDialog({
   onAddDefaultParameter,
   onDefaultParameterChange,
   onRemoveDefaultParameter,
+  onStreamingToggle,
 }: WorkflowDialogProps) {
   return (
     <DialogShell
@@ -182,6 +184,48 @@ export function WorkflowDialog({
                 </div>
               ))}
             </div>
+          </div>
+
+          <div className="space-y-3 rounded-md border border-border/60 bg-muted/10 p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase text-foreground/60">
+                  Streaming Feedback
+                </p>
+                <p className="text-xs text-foreground/60">
+                  Emit live workflow progress events over HTTP streaming.
+                </p>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={workflowForm.streamingEnabled}
+                  onChange={(event) => onStreamingToggle(event.target.checked)}
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-ring"
+                />
+                <span>
+                  {workflowForm.streamingEnabled ? "Enabled" : "Disabled"}
+                </span>
+              </label>
+            </div>
+
+            {workflowForm.streamingEnabled ? (
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-semibold uppercase text-foreground/60">
+                  Streaming Mode
+                </label>
+                <input
+                  type="text"
+                  value={workflowForm.streamingMode}
+                  onChange={onFieldChange("streamingMode")}
+                  className="rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  placeholder="sse"
+                  autoComplete="off"
+                  readOnly
+                  title="Only SSE is supported right now"
+                />
+              </div>
+            ) : null}
           </div>
 
           {workflowFormError ? (

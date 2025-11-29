@@ -44,6 +44,18 @@ public sealed class AgentDefinition
 
     [JsonPropertyName("ViewLayout")]
     public AgentViewLayout? ViewLayout { get; init; }
+
+    [JsonPropertyName("streaming")]
+    public AgentStreamingOptions? Streaming { get; init; }
+}
+
+public sealed class AgentStreamingOptions
+{
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; init; }
+
+    [JsonPropertyName("mode")]
+    public string Mode { get; init; } = "sse";
 }
 
 public sealed class AgentViewLayout

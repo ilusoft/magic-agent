@@ -90,6 +90,7 @@ export function AgentDefinitionsView({
     openWorkflowDialog,
     openWorkflowDialogForEdit,
     handleWorkflowFieldChange,
+    handleStreamingToggle,
     handleAddDefaultParameter,
     handleDefaultParameterChange,
     handleRemoveDefaultParameter,
@@ -426,6 +427,7 @@ export function AgentDefinitionsView({
           onAddDefaultParameter={handleAddDefaultParameter}
           onDefaultParameterChange={handleDefaultParameterChange}
           onRemoveDefaultParameter={handleRemoveDefaultParameter}
+          onStreamingToggle={handleStreamingToggle}
         />
       </div>
     </ReactFlowProvider>

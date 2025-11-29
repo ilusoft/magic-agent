@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using MagicAgent.Api.Application.AgentRunner;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,13 +10,21 @@ namespace MagicAgent.Api.Controllers;
 [Route("api/agents/{agentId}/runs")]
 public class AgentRunsController(
     IAgentRunner agentRunner,
-    IAgentDiagnosticsStore diagnosticsStore) : ControllerBase
+    IAgentDiagnosticsStore diagnosticsStore,
+    IAgentDefinitionsProvider definitionsProvider,
+    IAgentDefinitionValueResolver definitionValueResolver) : ControllerBase
 {
     private readonly IAgentRunner _agentRunner =
         agentRunner ?? throw new ArgumentNullException(nameof(agentRunner));
 
     private readonly IAgentDiagnosticsStore _diagnosticsStore =
         diagnosticsStore ?? throw new ArgumentNullException(nameof(diagnosticsStore));
+
+    private readonly IAgentDefinitionsProvider _definitionsProvider =
+        definitionsProvider ?? throw new ArgumentNullException(nameof(definitionsProvider));
+
+    private readonly IAgentDefinitionValueResolver _definitionValueResolver =
+        definitionValueResolver ?? throw new ArgumentNullException(nameof(definitionValueResolver));
 
     [HttpPost]
     public async Task<IActionResult> RunAsync(
@@ -25,7 +34,14 @@ public class AgentRunsController(
     {
         try
         {
-            var runResult = await RunInternalAsync(agentId, request, cancellationToken);
+            if (await ShouldStreamAsync(agentId, cancellationToken).ConfigureAwait(false))
+            {
+                await using var streamingSink = StreamingAgentRunProgressSink.Create(Response, HttpContext.RequestAborted);
+                await RunInternalAsync(agentId, request, streamingSink, cancellationToken).ConfigureAwait(false);
+                return new EmptyResult();
+            }
+
+            var runResult = await RunInternalAsync(agentId, request, null, cancellationToken).ConfigureAwait(false);
 
             var lastStep = runResult.Steps.Count > 0 ? runResult.Steps.Last() : null;
 
@@ -67,9 +83,40 @@ public class AgentRunsController(
         return Ok(diagnostics);
     }
 
+    private async Task<bool> ShouldStreamAsync(string agentId, CancellationToken cancellationToken)
+    {
+        if (!AcceptsEventStream())
+        {
+            return false;
+        }
+
+        var definition = await _definitionsProvider.GetAgentDefinitionAsync(agentId, cancellationToken).ConfigureAwait(false);
+
+        if (definition is null)
+        {
+            throw new AgentNotFoundException(agentId);
+        }
+
+        definition = _definitionValueResolver.Resolve(definition);
+
+        return definition.Streaming?.Enabled == true;
+    }
+
+    private bool AcceptsEventStream()
+    {
+        if (!Request.Headers.TryGetValue("Accept", out var acceptValues))
+        {
+            return false;
+        }
+
+        return acceptValues.Any(value =>
+            value?.IndexOf("text/event-stream", StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
     private async Task<AgentRunResult> RunInternalAsync(
         string agentId,
         RunAgentRequest? request,
+        IAgentRunProgressSink? progressSink,
         CancellationToken cancellationToken)
     {
         var inboundHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -90,7 +137,8 @@ public class AgentRunsController(
             agentId,
             request?.Input,
             request?.ConversationId,
-            inboundHeaders.Count > 0 ? inboundHeaders : null);
+            inboundHeaders.Count > 0 ? inboundHeaders : null,
+            progressSink);
 
         return await _agentRunner.RunAsync(runRequest, cancellationToken);
     }

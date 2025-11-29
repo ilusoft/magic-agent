@@ -26,6 +26,7 @@ builder.Services.AddSingleton<IAgentDefinitionsProvider, FileAgentDefinitionsPro
 builder.Services.AddSingleton<IAgentDefinitionValueResolver, AgentDefinitionConfigurationResolver>();
 builder.Services.AddSingleton<IAgentConversationStore, InMemoryAgentConversationStore>();
 builder.Services.AddSingleton<IAgentDiagnosticsStore, InMemoryAgentDiagnosticsStore>();
+builder.Services.AddSingleton<IAgentRunProgressSink, NoOpAgentRunProgressSink>();
 builder.Services.AddSingleton<IAgentRunner, DefaultAgentRunner>();
 
 var app = builder.Build();

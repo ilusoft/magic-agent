@@ -13,6 +13,12 @@ export interface AgentDefinition {
   steps: AgentStepDefinition[];
   tools?: AgentToolDefinition[];
   ViewLayout?: AgentViewLayout;
+  streaming?: AgentStreamingOptions;
+}
+
+export interface AgentStreamingOptions {
+  enabled?: boolean;
+  mode?: string;
 }
 
 export interface AgentViewLayout {

@@ -15,6 +15,7 @@ public sealed class DefaultAgentRunner(
   IAgentDefinitionValueResolver definitionValueResolver,
   IAgentConversationStore conversationStore,
   IAgentDiagnosticsStore diagnosticsStore,
+  IAgentRunProgressSink progressSink,
   ILogger<DefaultAgentRunner> logger) : IAgentRunner
 {
     private readonly IAgentDefinitionsProvider _definitionsProvider =
@@ -25,6 +26,8 @@ public sealed class DefaultAgentRunner(
       conversationStore ?? throw new ArgumentNullException(nameof(conversationStore));
     private readonly IAgentDiagnosticsStore _diagnosticsStore =
       diagnosticsStore ?? throw new ArgumentNullException(nameof(diagnosticsStore));
+    private readonly IAgentRunProgressSink _progressSink =
+      progressSink ?? throw new ArgumentNullException(nameof(progressSink));
     private readonly ILogger<DefaultAgentRunner> _logger =
       logger ?? throw new ArgumentNullException(nameof(logger));
     private const int MaxWorkflowSteps = 100;
@@ -38,6 +41,8 @@ public sealed class DefaultAgentRunner(
         {
             throw new ArgumentException("AgentId must be provided.", nameof(request));
         }
+
+        var progressSink = request.ProgressSink ?? _progressSink;
 
         var definition = await _definitionsProvider.GetAgentDefinitionAsync(request.AgentId, cancellationToken);
 
@@ -137,6 +142,13 @@ public sealed class DefaultAgentRunner(
                 stepDefinition.Type,
                 executedSteps);
 
+            await progressSink.StepStartingAsync(
+                definition.Id,
+                stepDefinition.Name,
+                stepDefinition.Type,
+                executedSteps,
+                cancellationToken).ConfigureAwait(false);
+
             var stepInput = pendingInput;
 
             if (!string.IsNullOrWhiteSpace(stepInput))
@@ -181,6 +193,7 @@ public sealed class DefaultAgentRunner(
               cancellationToken).ConfigureAwait(false);
 
             stepStopwatch.Stop();
+            var elapsed = stepStopwatch.Elapsed;
 
             conversationId = updatedConversationId;
             pendingInput = DetermineNextStepInput(stepDefinition, stepInput, executionResult.Output);
@@ -198,6 +211,12 @@ public sealed class DefaultAgentRunner(
             };
 
             stepResults.Add(enrichedResult);
+
+            await progressSink.StepCompletedAsync(
+                definition.Id,
+                enrichedResult,
+                elapsed,
+                cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation(
                 "[Workflow] Agent {AgentId} completed step {StepName} in {ElapsedMs} ms. Outcome: {Outcome}, Next: {NextStep}, EndWorkflow: {EndWorkflow}, ToolError: {ToolErrorDetected}.",
@@ -225,6 +244,8 @@ public sealed class DefaultAgentRunner(
         {
             await _diagnosticsStore.SaveRunAsync(runResult.ConversationId!, runResult, cancellationToken).ConfigureAwait(false);
         }
+
+        await progressSink.RunCompletedAsync(runResult, cancellationToken).ConfigureAwait(false);
 
         return runResult;
     }

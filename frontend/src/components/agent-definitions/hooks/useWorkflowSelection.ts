@@ -31,6 +31,7 @@ interface UseWorkflowSelectionResult {
   handleWorkflowFieldChange: (
     field: keyof WorkflowFormState
   ) => (event: React.ChangeEvent<HTMLInputElement>) => void;
+  handleStreamingToggle: (enabled: boolean) => void;
   handleAddDefaultParameter: () => void;
   handleDefaultParameterChange: (
     entryId: string,
@@ -94,6 +95,8 @@ export function useWorkflowSelection({
       deployment: "",
       apiKey: "",
       defaultParameters: [createKeyValueEntry()],
+      streamingEnabled: false,
+      streamingMode: "sse",
     });
     setWorkflowFormError(null);
     setWorkflowDialogMode("create");
@@ -115,6 +118,8 @@ export function useWorkflowSelection({
         parameterEntries.length > 0
           ? parameterEntries
           : [createKeyValueEntry()],
+      streamingEnabled: agent.streaming?.enabled ?? false,
+      streamingMode: agent.streaming?.mode ?? "sse",
     });
     setWorkflowFormError(null);
     setWorkflowDialogMode("edit");
@@ -132,6 +137,12 @@ export function useWorkflowSelection({
       },
     []
   );
+
+  const handleStreamingToggle = useCallback((enabled: boolean) => {
+    setWorkflowForm((previous) =>
+      previous ? { ...previous, streamingEnabled: enabled } : previous
+    );
+  }, []);
 
   const handleAddDefaultParameter = useCallback(() => {
     setWorkflowForm((previous) =>
@@ -230,6 +241,12 @@ export function useWorkflowSelection({
             steps: [],
             tools: [],
             ViewLayout: { nodes: {} },
+            streaming: workflowForm.streamingEnabled
+              ? {
+                  enabled: true,
+                  mode: workflowForm.streamingMode.trim() || "sse",
+                }
+              : undefined,
           };
 
           draft.agents.push(newWorkflow);
@@ -267,6 +284,12 @@ export function useWorkflowSelection({
             deployment: workflowForm.deployment.trim() || undefined,
             apiKey: trimmedApiKey || undefined,
             defaultParameters: defaultParametersRecord,
+            streaming: workflowForm.streamingEnabled
+              ? {
+                  enabled: true,
+                  mode: workflowForm.streamingMode.trim() || "sse",
+                }
+              : undefined,
           };
 
           return draft;
@@ -359,6 +382,7 @@ export function useWorkflowSelection({
     openWorkflowDialog,
     openWorkflowDialogForEdit,
     handleWorkflowFieldChange,
+    handleStreamingToggle,
     handleAddDefaultParameter,
     handleDefaultParameterChange,
     handleRemoveDefaultParameter,

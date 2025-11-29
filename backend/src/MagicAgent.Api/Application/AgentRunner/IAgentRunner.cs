@@ -6,7 +6,8 @@ public sealed record AgentRunRequest(
     string AgentId,
     string? Input,
     string? ConversationId = null,
-    IReadOnlyDictionary<string, string>? Headers = null);
+    IReadOnlyDictionary<string, string>? Headers = null,
+    IAgentRunProgressSink? ProgressSink = null);
 
 public sealed record AgentStepExecutionResult(string Name, string Type, string Output)
 {

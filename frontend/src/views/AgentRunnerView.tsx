@@ -5,6 +5,8 @@ import type {
   AgentConversationDiagnostics,
   AgentDefinitionsDocument,
   AgentMessage,
+  AgentRunResult,
+  AgentStepExecutionResult,
   AgentWorkflowResult,
 } from "../types/agents";
 import { AgentChat } from "../components/AgentChat";
@@ -22,6 +24,48 @@ export interface AgentRunnerState {
   diagnostics: AgentConversationDiagnostics | null;
   debugError: string | null;
   showDebugPanel: boolean;
+}
+
+interface ParsedServerSentEvent {
+  eventName: string | null;
+  data: string | null;
+}
+
+function parseServerSentEvent(chunk: string): ParsedServerSentEvent {
+  const lines = chunk.split("\n");
+  let eventName: string | null = null;
+  let data: string | null = null;
+
+  for (const line of lines) {
+    if (line.startsWith("event:")) {
+      eventName = line.slice("event:".length).trim();
+    } else if (line.startsWith("data:")) {
+      const payload = line.slice("data:".length).trim();
+      data = data ? `${data}\n${payload}` : payload;
+    }
+  }
+
+  return { eventName, data };
+}
+
+function formatStepCompletion(step?: AgentStepExecutionResult): string {
+  if (!step) {
+    return "Step completed.";
+  }
+
+  const parts = [`Completed step ${step.name}`];
+
+  if (step.outcome) {
+    parts.push(`Outcome: ${step.outcome}`);
+  }
+
+  if (step.nextStep) {
+    parts.push(`Next: ${step.nextStep}`);
+  } else if (step.endWorkflow) {
+    parts.push("Workflow ended");
+  }
+
+  return parts.join(" | ");
 }
 
 interface AgentRunnerViewProps {
@@ -91,6 +135,38 @@ export function AgentRunnerView({
         new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
   }, []);
+
+  const appendConversationMessage = useCallback(
+    (message: AgentMessage) => {
+      setRunnerState((previous) => ({
+        ...previous,
+        conversation: sortMessages([...previous.conversation, message]),
+      }));
+    },
+    [setRunnerState, sortMessages]
+  );
+
+  const appendSystemMessage = useCallback(
+    (content: string) => {
+      appendConversationMessage({
+        role: "system",
+        content,
+        timestamp: new Date().toISOString(),
+      });
+    },
+    [appendConversationMessage]
+  );
+
+  const appendAssistantMessage = useCallback(
+    (content: string) => {
+      appendConversationMessage({
+        role: "assistant",
+        content,
+        timestamp: new Date().toISOString(),
+      });
+    },
+    [appendConversationMessage]
+  );
 
   const createAuthHeaders = useCallback(() => {
     const headerName = authHeaderName.trim() || "Authorization";
@@ -185,74 +261,190 @@ export function AgentRunnerView({
       debugError: null,
     }));
 
+    const authHeaders = createAuthHeaders();
+    const baseHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...authHeaders,
+    };
+
+    const userMessage: AgentMessage = {
+      role: "user",
+      content: input,
+      timestamp: new Date().toISOString(),
+    };
+
+    appendConversationMessage(userMessage);
+
+    const requestBody = JSON.stringify({ input, conversationId });
+    const streamingEnabled = Boolean(selectedAgent?.streaming?.enabled);
+
     try {
-      const authHeaders = createAuthHeaders();
+      const runAgentWithoutStreaming = async () => {
+        const response = await fetch(
+          `${apiBaseUrl}/api/agents/${selectedAgentId}/runs`,
+          {
+            method: "POST",
+            headers: baseHeaders,
+            body: requestBody,
+          }
+        );
 
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        ...authHeaders,
-      };
-
-      const userMessage: AgentMessage = {
-        role: "user",
-        content: input,
-        timestamp: new Date().toISOString(),
-      };
-
-      setRunnerState((previous) => ({
-        ...previous,
-        conversation: sortMessages([...previous.conversation, userMessage]),
-      }));
-
-      const response = await fetch(
-        `${apiBaseUrl}/api/agents/${selectedAgentId}/runs`,
-        {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ input, conversationId }),
+        if (!response.ok) {
+          throw new Error(`Agent run failed (${response.status})`);
         }
-      );
 
-      if (!response.ok) {
-        throw new Error(`Agent run failed (${response.status})`);
-      }
+        const result = (await response.json()) as AgentWorkflowResult;
+        const assistantOutput = result.lastStep?.output;
 
-      const result = (await response.json()) as AgentWorkflowResult;
+        if (assistantOutput) {
+          appendAssistantMessage(assistantOutput);
+        }
 
-      const assistantOutput = result.lastStep?.output;
+        if (result.conversationId) {
+          setRunnerState((previous) => ({
+            ...previous,
+            conversationId: result.conversationId ?? null,
+          }));
 
-      if (assistantOutput) {
-        const assistantMessage: AgentMessage = {
-          role: "assistant",
-          content: assistantOutput,
-          timestamp: new Date().toISOString(),
+          await loadDiagnostics(
+            selectedAgentId,
+            result.conversationId,
+            authHeaders
+          );
+        }
+
+        setRunnerState((previous) => ({
+          ...previous,
+          input: "",
+        }));
+      };
+
+      const runAgentWithStreaming = async () => {
+        const streamingHeaders: Record<string, string> = {
+          ...baseHeaders,
+          Accept: "text/event-stream",
         };
 
-        setRunnerState((previous) => ({
-          ...previous,
-          conversation: sortMessages([
-            ...previous.conversation,
-            assistantMessage,
-          ]),
-        }));
-      }
-
-      if (result.conversationId) {
-        setRunnerState((previous) => ({
-          ...previous,
-          conversationId: result.conversationId ?? null,
-        }));
-        await loadDiagnostics(
-          selectedAgentId,
-          result.conversationId,
-          authHeaders
+        const response = await fetch(
+          `${apiBaseUrl}/api/agents/${selectedAgentId}/runs`,
+          {
+            method: "POST",
+            headers: streamingHeaders,
+            body: requestBody,
+          }
         );
-      }
 
-      setRunnerState((previous) => ({
-        ...previous,
-        input: "",
-      }));
+        if (!response.ok) {
+          throw new Error(`Agent run failed (${response.status})`);
+        }
+
+        if (!response.body) {
+          throw new Error("Streaming is not supported in this browser.");
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let runCompleted = false;
+
+        const handleRunCompletion = async (runResult: AgentRunResult) => {
+          const lastStep = runResult.steps.at(-1);
+
+          if (lastStep?.output) {
+            appendAssistantMessage(lastStep.output);
+          }
+
+          setRunnerState((previous) => ({
+            ...previous,
+            conversationId: runResult.conversationId ?? previous.conversationId,
+            input: "",
+          }));
+
+          if (runResult.conversationId) {
+            await loadDiagnostics(
+              selectedAgentId,
+              runResult.conversationId,
+              authHeaders
+            );
+          }
+        };
+
+        const processEventChunk = async (chunk: string) => {
+          const { eventName, data } = parseServerSentEvent(chunk);
+
+          if (!eventName || !data) {
+            return;
+          }
+
+          let parsed: unknown;
+
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            return;
+          }
+
+          if (eventName === "step-start" && typeof parsed === "object") {
+            const { stepName, stepType } = parsed as {
+              stepName?: string;
+              stepType?: string;
+            };
+            appendSystemMessage(
+              `Starting step ${stepName ?? "(unknown)"}$${
+                stepType ? ` [${stepType}]` : ""
+              }`.replace("$$", "")
+            );
+            return;
+          }
+
+          if (eventName === "step-complete") {
+            const step = (parsed as { step?: AgentStepExecutionResult }).step;
+            appendSystemMessage(formatStepCompletion(step));
+            return;
+          }
+
+          if (eventName === "run-complete") {
+            runCompleted = true;
+            await handleRunCompletion(parsed as AgentRunResult);
+          }
+        };
+
+        while (true) {
+          const { value, done } = await reader.read();
+
+          if (value) {
+            buffer += decoder.decode(value, { stream: true });
+
+            let separatorIndex = buffer.indexOf("\n\n");
+
+            while (separatorIndex >= 0) {
+              const chunk = buffer.slice(0, separatorIndex);
+              buffer = buffer.slice(separatorIndex + 2);
+              await processEventChunk(chunk);
+
+              if (runCompleted) {
+                await reader.cancel();
+                return;
+              }
+
+              separatorIndex = buffer.indexOf("\n\n");
+            }
+          }
+
+          if (done) {
+            if (buffer.trim().length > 0) {
+              await processEventChunk(buffer.trim());
+            }
+            break;
+          }
+        }
+      };
+
+      if (streamingEnabled) {
+        await runAgentWithStreaming();
+      } else {
+        await runAgentWithoutStreaming();
+      }
     } catch (runErr) {
       const message =
         runErr instanceof Error ? runErr.message : "Agent run failed.";

@@ -609,6 +609,10 @@
           },
           "zoom": 1.1983375993212357
         }
+      },
+      "streaming": {
+        "enabled": true,
+        "mode": "sse"
       }
     },
     {
@@ -656,7 +660,8 @@
           },
           "zoom": 2
         }
-      }
+      },
+      "streaming": null
     }
   ]
 }
