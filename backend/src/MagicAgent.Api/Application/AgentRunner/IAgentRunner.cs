@@ -13,6 +13,8 @@ public sealed record AgentStepExecutionResult(string Name, string Type, string O
 {
     public string? Input { get; init; }
 
+    public IReadOnlyDictionary<string, string>? ResolvedParameters { get; init; }
+
     public JsonElement? ThreadContext { get; init; }
 
     public string? Outcome { get; init; }

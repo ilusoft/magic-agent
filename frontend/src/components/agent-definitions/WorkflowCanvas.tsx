@@ -37,6 +37,7 @@ export interface WorkflowCanvasProps {
   onNodeClick?: NodeMouseHandler;
   onNodeDoubleClick: NodeMouseHandler;
   onEdgeClick: EdgeMouseHandler;
+  onEdgeDoubleClick?: EdgeMouseHandler;
   onEdgeMouseEnter: EdgeMouseHandler;
   onNodeDragStart?: NodeDragHandler;
   onNodeDragStop: NodeDragHandler;
@@ -63,6 +64,7 @@ export function WorkflowCanvas({
   onNodeClick,
   onNodeDoubleClick,
   onEdgeClick,
+  onEdgeDoubleClick,
   onEdgeMouseEnter,
   onNodeDragStart,
   onNodeDragStop,
@@ -384,7 +386,6 @@ export function WorkflowCanvas({
       edgeTypes={edgeTypes}
       defaultViewport={initialViewportTransform}
       nodesConnectable={false}
-      elementsSelectable={false}
       snapToGrid={snapEnabled}
       snapGrid={[SNAP_GRID_SIZE, SNAP_GRID_SIZE]}
       onNodesChange={onNodesChange}
@@ -392,6 +393,7 @@ export function WorkflowCanvas({
       onNodeClick={handleNodeClickInternal}
       onNodeDoubleClick={onNodeDoubleClick}
       onEdgeClick={onEdgeClick}
+      onEdgeDoubleClick={onEdgeDoubleClick}
       onEdgeMouseEnter={onEdgeMouseEnter}
       onNodeDragStart={handleNodeDragStartInternal}
       onNodeDragStop={handleNodeDragStopInternal}

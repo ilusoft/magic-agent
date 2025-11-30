@@ -221,7 +221,7 @@ internal static class ToolInvocationUtilities
                 var single = CreateInvocationFromJsonObject(element);
                 if (single is not null)
                 {
-                    invocations = [ single ];
+                    invocations = [single];
                     return true;
                 }
 
@@ -433,7 +433,11 @@ internal static class ToolInvocationUtilities
 
         if (invocationId is not null && functionCallMetadata.TryGetValue(invocationId, out var metadata))
         {
-            toolName ??= metadata.ToolName;
+            if (!string.IsNullOrWhiteSpace(metadata.ToolName))
+            {
+                toolName = metadata.ToolName;
+            }
+
             argumentsJson ??= metadata.ArgumentsJson;
         }
 

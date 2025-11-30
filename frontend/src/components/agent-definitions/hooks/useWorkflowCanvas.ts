@@ -10,7 +10,9 @@ import {
 
 import type {
   AgentDefinitionsDocument,
+  AgentNodeHandlePlacement,
   AgentViewLayoutViewport,
+  WorkflowHandlePosition,
 } from "../../../types/agents";
 import type { WorkflowEdge, WorkflowGraph, WorkflowNode } from "../types";
 import { WORKFLOW_EDGE_TYPE } from "../workflowGraph";
@@ -87,21 +89,7 @@ function snapNodePosition(node: WorkflowNode, enabled: boolean) {
 }
 
 function getLayoutKeysForNode(workflowNode: WorkflowNode): string[] {
-  const keys = new Set<string>([workflowNode.id]);
-
-  if (
-    (workflowNode.data.kind === "step" ||
-      workflowNode.data.kind === "placeholder") &&
-    workflowNode.data.stepName
-  ) {
-    keys.add(workflowNode.data.stepName);
-  }
-
-  if (workflowNode.data.kind === "tool" && workflowNode.data.toolId) {
-    keys.add(workflowNode.data.toolId);
-  }
-
-  return Array.from(keys);
+  return [workflowNode.id];
 }
 
 function getNodesSignature(nodes: WorkflowNode[]): string {
@@ -197,18 +185,13 @@ export function useWorkflowCanvas({
         }
 
         const layoutKeys = getLayoutKeysForNode(workflowNode);
-        const allowFallbackCreation = workflowNode.data.kind === "start";
         layoutKeys.forEach((key) => {
-          const isPrimaryKey = key === workflowNode.id;
-          const keyExists = key in agent.ViewLayout!.nodes!;
-
-          if (!isPrimaryKey && !keyExists && !allowFallbackCreation) {
-            return;
-          }
+          const existingLayout = agent.ViewLayout!.nodes![key];
 
           agent.ViewLayout!.nodes![key] = {
             x: position.x,
             y: position.y,
+            handles: existingLayout?.handles,
           };
         });
 
@@ -408,6 +391,100 @@ export function useWorkflowCanvas({
       persistNodePosition(workflowNode, snappedPosition);
     },
     [persistNodePosition, snapEnabled, updateNodePositionState]
+  );
+
+  const updateNodeHandlePlacementState = useCallback(
+    (
+      nodeId: string,
+      handle: keyof AgentNodeHandlePlacement,
+      position: WorkflowHandlePosition
+    ) => {
+      setNodes((current) =>
+        current.map((existing) => {
+          if (existing.id !== nodeId) {
+            return existing;
+          }
+
+          const existingPlacement = existing.data?.handlePlacement ?? {};
+
+          return {
+            ...existing,
+            data: {
+              ...existing.data,
+              handlePlacement: {
+                ...existingPlacement,
+                [handle]: position,
+              },
+            },
+          };
+        })
+      );
+    },
+    [setNodes]
+  );
+
+  const persistNodeHandlePlacement = useCallback(
+    (
+      workflowNode: WorkflowNode,
+      handle: keyof AgentNodeHandlePlacement,
+      position: WorkflowHandlePosition
+    ) => {
+      if (!activeWorkflowId || workflowNode.data.kind === "empty") {
+        return;
+      }
+
+      applyDocumentUpdate((draft) => {
+        const agent = draft.agents.find(
+          (candidate) => candidate.id === activeWorkflowId
+        );
+
+        if (!agent) {
+          return draft;
+        }
+
+        if (!agent.ViewLayout) {
+          agent.ViewLayout = { nodes: {} };
+        }
+
+        if (!agent.ViewLayout.nodes) {
+          agent.ViewLayout.nodes = {};
+        }
+
+        const layoutKeys = getLayoutKeysForNode(workflowNode);
+
+        layoutKeys.forEach((key) => {
+          const existingLayout = agent.ViewLayout!.nodes![key];
+          const basePosition = existingLayout ?? {
+            x: workflowNode.position?.x ?? 0,
+            y: workflowNode.position?.y ?? 0,
+          };
+
+          agent.ViewLayout!.nodes![key] = {
+            x: basePosition.x,
+            y: basePosition.y,
+            handles: {
+              ...(existingLayout?.handles ?? {}),
+              [handle]: position,
+            },
+          };
+        });
+
+        return draft;
+      });
+    },
+    [activeWorkflowId, applyDocumentUpdate]
+  );
+
+  const handleNodeHandlePlacementChange = useCallback(
+    (
+      workflowNode: WorkflowNode,
+      handle: keyof AgentNodeHandlePlacement,
+      placement: WorkflowHandlePosition
+    ) => {
+      updateNodeHandlePlacementState(workflowNode.id, handle, placement);
+      persistNodeHandlePlacement(workflowNode, handle, placement);
+    },
+    [persistNodeHandlePlacement, updateNodeHandlePlacementState]
   );
 
   const handleEdgeControlPointChange = useCallback(
@@ -627,8 +704,31 @@ export function useWorkflowCanvas({
     [activeWorkflowId, applyDocumentUpdate]
   );
 
+  const nodesWithHandlers = useMemo(() => {
+    return nodes.map((node) => {
+      if (!node.data) {
+        return node;
+      }
+
+      if (node.data.kind !== "step" && node.data.kind !== "tool") {
+        return node;
+      }
+
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          onHandlePlacementChange: (
+            handle: keyof AgentNodeHandlePlacement,
+            position: WorkflowHandlePosition
+          ) => handleNodeHandlePlacementChange(node, handle, position),
+        },
+      };
+    });
+  }, [nodes, handleNodeHandlePlacementChange]);
+
   return {
-    nodes,
+    nodes: nodesWithHandlers,
     edges: edgesWithHandlers as WorkflowEdge[],
     onEdgesChange: handleEdgesChange as OnEdgesChange,
     handleNodesChange: handleNodesChange as OnNodesChange,

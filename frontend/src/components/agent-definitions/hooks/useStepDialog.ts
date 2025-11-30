@@ -34,6 +34,7 @@ const STEP_TYPE_PARAMETER_TEMPLATES: Record<StepType, string[]> = {
   chat: ["systemPrompt", "message"],
   echo: ["message"],
   "pass-through": [],
+  setVariables: [],
 };
 
 const DEFAULT_STEP_TYPE: StepType = "chat";
@@ -50,7 +51,7 @@ function ensureParametersForStepType(
   type: StepType,
   currentParameters: KeyValueEntry[]
 ): KeyValueEntry[] {
-  const templateKeys = STEP_TYPE_PARAMETER_TEMPLATES[type];
+  const templateKeys = STEP_TYPE_PARAMETER_TEMPLATES[type] ?? [];
 
   if (templateKeys.length === 0) {
     return currentParameters;
@@ -176,6 +177,7 @@ interface UseStepDialogResult {
   open: boolean;
   openForEditing: (workflowNode: WorkflowNode) => void;
   openForCreation: () => void;
+  openForVariableCreation: () => void;
   reset: () => void;
 }
 
@@ -291,6 +293,22 @@ export function useStepDialog({
     setIsOpen(true);
   }, []);
 
+  const openForVariableCreation = useCallback(() => {
+    const initialType: StepType = "setVariables";
+    setStepForm({
+      name: "",
+      type: initialType,
+      conversationEnabled: false,
+      parameters: ensureParametersForStepType(initialType, []),
+      tools: [],
+    });
+    setStepFormError(null);
+    setStepOriginalName(null);
+    setMode("create");
+    setDialogTarget(null);
+    setIsOpen(true);
+  }, []);
+
   const handleFieldChange = useCallback(
     (field: "name" | "type") =>
       (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -302,13 +320,19 @@ export function useStepDialog({
 
           if (field === "type") {
             const nextType = coerceStepType(value);
+            const nextParameters = ensureParametersForStepType(
+              nextType,
+              previous.parameters ?? []
+            );
             return {
               ...previous,
               type: nextType,
-              parameters: ensureParametersForStepType(
-                nextType,
-                previous.parameters ?? []
-              ),
+              parameters: nextParameters,
+              conversationEnabled:
+                nextType === "setVariables"
+                  ? false
+                  : previous.conversationEnabled,
+              tools: nextType === "setVariables" ? [] : previous.tools ?? [],
             };
           }
 
@@ -588,6 +612,7 @@ export function useStepDialog({
     open: isOpen,
     openForEditing,
     openForCreation,
+    openForVariableCreation,
     reset,
   };
 }

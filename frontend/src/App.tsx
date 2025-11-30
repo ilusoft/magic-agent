@@ -9,6 +9,46 @@ type ActiveView = "editor" | "runner";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5134";
+const RUNNER_STATE_STORAGE_KEY = "magic-agent-runner-state";
+
+const defaultRunnerState: AgentRunnerState = {
+  selectedAgentId: undefined,
+  input: "",
+  conversationId: null,
+  conversation: [],
+  isRunning: false,
+  runError: null,
+  authHeaderName: "Authorization",
+  authHeaderValue: "",
+  diagnostics: null,
+  debugError: null,
+  showDebugPanel: false,
+};
+
+function loadRunnerState(): AgentRunnerState {
+  if (typeof window === "undefined") {
+    return defaultRunnerState;
+  }
+
+  try {
+    const stored = window.sessionStorage.getItem(RUNNER_STATE_STORAGE_KEY);
+
+    if (!stored) {
+      return defaultRunnerState;
+    }
+
+    const parsed = JSON.parse(stored) as Partial<AgentRunnerState>;
+    return {
+      ...defaultRunnerState,
+      ...parsed,
+      conversation: Array.isArray(parsed.conversation)
+        ? parsed.conversation
+        : defaultRunnerState.conversation,
+    };
+  } catch {
+    return defaultRunnerState;
+  }
+}
 
 function App() {
   const [activeView, setActiveView] = useState<ActiveView>("editor");
@@ -16,19 +56,24 @@ function App() {
     useState<AgentDefinitionsDocument | null>(null);
   const [loadingDefs, setLoadingDefs] = useState(false);
   const [definitionsError, setDefinitionsError] = useState<string | null>(null);
-  const [runnerState, setRunnerState] = useState<AgentRunnerState>({
-    selectedAgentId: undefined,
-    input: "",
-    conversationId: null,
-    conversation: [],
-    isRunning: false,
-    runError: null,
-    authHeaderName: "Authorization",
-    authHeaderValue: "",
-    diagnostics: null,
-    debugError: null,
-    showDebugPanel: false,
-  });
+  const [runnerState, setRunnerState] = useState<AgentRunnerState>(() =>
+    loadRunnerState()
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      window.sessionStorage.setItem(
+        RUNNER_STATE_STORAGE_KEY,
+        JSON.stringify(runnerState)
+      );
+    } catch {
+      // Ignore storage errors (e.g., quota exceeded)
+    }
+  }, [runnerState]);
 
   const loadDefinitions = useCallback(async () => {
     setLoadingDefs(true);

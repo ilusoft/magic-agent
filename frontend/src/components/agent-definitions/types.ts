@@ -1,5 +1,11 @@
 import type { Edge, Node } from "reactflow";
-import type { AgentViewLayoutNode } from "../../types/agents";
+import type {
+  AgentNodeHandlePlacement,
+  AgentViewLayoutNode,
+  WorkflowHandlePosition,
+} from "../../types/agents";
+
+export type { WorkflowHandlePosition } from "../../types/agents";
 
 export type NodeKind =
   | "start"
@@ -7,12 +13,19 @@ export type NodeKind =
   | "placeholder"
   | "termination"
   | "tool"
+  | "variable"
   | "empty";
 
 export interface WorkflowNodeData {
   label: string;
   kind: NodeKind;
   stepName?: string;
+  stepType?: StepType;
+  handlePlacement?: AgentNodeHandlePlacement;
+  onHandlePlacementChange?: (
+    handle: keyof AgentNodeHandlePlacement,
+    position: WorkflowHandlePosition
+  ) => void;
   toolId?: string;
   outcomeName?: string;
   hasSavedPosition?: boolean;
@@ -56,9 +69,14 @@ export interface KeyValueEntry {
   value: string;
 }
 
-export type StepType = "chat" | "echo" | "pass-through";
+export type StepType = "chat" | "echo" | "pass-through" | "setVariables";
 
-export const STEP_TYPE_OPTIONS: StepType[] = ["chat", "echo", "pass-through"];
+export const STEP_TYPE_OPTIONS: StepType[] = [
+  "chat",
+  "echo",
+  "pass-through",
+  "setVariables",
+];
 
 export interface StepFormState {
   name: string;

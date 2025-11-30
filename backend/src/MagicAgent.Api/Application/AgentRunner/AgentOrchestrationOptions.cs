@@ -77,6 +77,39 @@ public sealed class AgentViewLayoutNode
 
     [JsonPropertyName("y")]
     public double Y { get; init; }
+
+    [JsonPropertyName("handles")]
+    public AgentNodeHandlePlacement? Handles { get; init; }
+}
+
+public sealed class AgentNodeHandlePlacement
+{
+    [JsonPropertyName("input")]
+    [JsonConverter(typeof(JsonStringEnumConverter<WorkflowHandlePosition>))]
+    public WorkflowHandlePosition? Input { get; init; }
+
+    [JsonPropertyName("outcomes")]
+    [JsonConverter(typeof(JsonStringEnumConverter<WorkflowHandlePosition>))]
+    public WorkflowHandlePosition? Outcomes { get; init; }
+
+    [JsonPropertyName("tools")]
+    [JsonConverter(typeof(JsonStringEnumConverter<WorkflowHandlePosition>))]
+    public WorkflowHandlePosition? Tools { get; init; }
+}
+
+public enum WorkflowHandlePosition
+{
+    [JsonPropertyName("top")]
+    Top,
+
+    [JsonPropertyName("right")]
+    Right,
+
+    [JsonPropertyName("bottom")]
+    Bottom,
+
+    [JsonPropertyName("left")]
+    Left,
 }
 
 public sealed class AgentViewLayoutEdge

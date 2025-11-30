@@ -4,6 +4,7 @@ import { WorkflowToolbox } from "./WorkflowToolbox";
 interface WorkflowBuilderPanelProps {
   disabled: boolean;
   onAddStep: () => void;
+  onAddVariableStep: () => void;
   onAddOutcome: () => void;
   onAddTool: () => void;
   onAddStart: () => void;
@@ -14,6 +15,7 @@ interface WorkflowBuilderPanelProps {
 export function WorkflowBuilderPanel({
   disabled,
   onAddStep,
+  onAddVariableStep,
   onAddOutcome,
   onAddTool,
   onAddStart,
@@ -25,6 +27,7 @@ export function WorkflowBuilderPanel({
       <WorkflowToolbox
         disabled={disabled}
         onAddStep={onAddStep}
+        onAddVariableStep={onAddVariableStep}
         onAddOutcome={onAddOutcome}
         onAddTool={onAddTool}
         onAddStart={onAddStart}

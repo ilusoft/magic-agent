@@ -27,9 +27,18 @@ export interface AgentViewLayout {
   viewport?: AgentViewLayoutViewport;
 }
 
+export type WorkflowHandlePosition = "top" | "right" | "bottom" | "left";
+
+export interface AgentNodeHandlePlacement {
+  input?: WorkflowHandlePosition;
+  outcomes?: WorkflowHandlePosition;
+  tools?: WorkflowHandlePosition;
+}
+
 export interface AgentViewLayoutNode {
   x: number;
   y: number;
+  handles?: AgentNodeHandlePlacement;
 }
 
 export interface AgentViewLayoutEdge {
@@ -111,6 +120,7 @@ export interface AgentStepExecutionResult {
   type: string;
   output: string;
   input?: string | null;
+  resolvedParameters?: Record<string, string>;
   threadContext?: unknown;
   outcome?: string | null;
   nextStep?: string | null;

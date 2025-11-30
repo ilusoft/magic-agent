@@ -11,6 +11,7 @@ import {
   buildWorkflowGraph,
 } from "../components/agent-definitions/workflowGraph";
 import { WorkflowStepNode } from "../components/agent-definitions/WorkflowStepNode";
+import { WorkflowToolNode } from "../components/agent-definitions/WorkflowToolNode";
 import type {
   WorkflowEdge,
   WorkflowGraph,
@@ -185,6 +186,7 @@ export function AgentDefinitionsView({
     () => ({
       step: WorkflowStepNode,
       placeholder: WorkflowStepNode,
+      tool: WorkflowToolNode,
     }),
     []
   );
@@ -200,6 +202,7 @@ export function AgentDefinitionsView({
     stepDialogProps,
     openStepDialogForNode,
     openStepDialogForCreation,
+    openVariableStepDialogForCreation,
     toolDialogProps,
     openToolDialogForNode,
     openToolDialogForCreation,
@@ -236,19 +239,11 @@ export function AgentDefinitionsView({
     (_event, node) => {
       const workflowNode = node as WorkflowNode;
 
-      if (
-        workflowNode.data.kind === "step" ||
-        workflowNode.data.kind === "placeholder"
-      ) {
+      if (workflowNode.data.kind === "placeholder") {
         openStepDialogForNode(workflowNode);
-        return;
-      }
-
-      if (workflowNode.data.kind === "tool") {
-        openToolDialogForNode(workflowNode);
       }
     },
-    [openStepDialogForNode, openToolDialogForNode]
+    [openStepDialogForNode]
   );
 
   const handleNodeDoubleClick = useCallback<NodeMouseHandler>(
@@ -271,8 +266,14 @@ export function AgentDefinitionsView({
 
   const handleEdgeClick = useCallback<EdgeMouseHandler>(
     (_event, edge) => {
-      const workflowEdge = edge as WorkflowEdge;
       setActiveEdgeId(edge.id);
+    },
+    [setActiveEdgeId]
+  );
+
+  const handleEdgeDoubleClick = useCallback<EdgeMouseHandler>(
+    (_event, edge) => {
+      const workflowEdge = edge as WorkflowEdge;
 
       if (workflowEdge.data?.sourceStep === "start") {
         handleAddStart();
@@ -283,7 +284,7 @@ export function AgentDefinitionsView({
         openOutcomeDialogForEdge(workflowEdge);
       }
     },
-    [handleAddStart, openOutcomeDialogForEdge, setActiveEdgeId]
+    [handleAddStart, openOutcomeDialogForEdge]
   );
 
   const toolboxDisabled = !activeAgent;
@@ -363,6 +364,7 @@ export function AgentDefinitionsView({
               <WorkflowBuilderPanel
                 disabled={toolboxDisabled}
                 onAddStep={openStepDialogForCreation}
+                onAddVariableStep={openVariableStepDialogForCreation}
                 onAddOutcome={handleAddOutcome}
                 onAddTool={openToolDialogForCreation}
                 onAddStart={handleAddStart}
@@ -381,6 +383,7 @@ export function AgentDefinitionsView({
                   onNodeClick={handleNodeClick}
                   onNodeDoubleClick={handleNodeDoubleClick}
                   onEdgeClick={handleEdgeClick}
+                  onEdgeDoubleClick={handleEdgeDoubleClick}
                   onEdgeMouseEnter={handleEdgeMouseEnter}
                   onNodeDragStop={handleNodeDragStop}
                   onPaneClick={handlePaneClick}

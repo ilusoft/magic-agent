@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -74,6 +75,8 @@ public sealed class DefaultAgentRunner(
         var conversationId = request.ConversationId;
         JsonElement? sharedThreadState = null;
         var pendingInput = request.Input;
+        var lastStepOutput = pendingInput;
+        var workflowVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         var toolBuilder = new AgentToolBuilder(_logger);
         await using var toolContext = await toolBuilder.BuildAsync(definition, request.Headers, cancellationToken).ConfigureAwait(false);
@@ -182,6 +185,18 @@ public sealed class DefaultAgentRunner(
 
             var stepStopwatch = Stopwatch.StartNew();
 
+            var resolvedParameters = WorkflowPlaceholderResolver.ResolveDictionary(
+                stepDefinition.Parameters,
+                workflowVariables,
+                stepInput,
+                lastStepOutput);
+
+            var resolvedOptions = WorkflowPlaceholderResolver.ResolveDictionary(
+                stepDefinition.Options,
+                workflowVariables,
+                stepInput,
+                lastStepOutput);
+
             var (executionResult, updatedConversationId, updatedThreadState, stepThreadContext) = await ExecuteStepAsync(
               definition,
               stepDefinition,
@@ -190,6 +205,9 @@ public sealed class DefaultAgentRunner(
               conversationId,
               stepTools,
               sharedThreadState,
+              resolvedParameters,
+              resolvedOptions,
+              workflowVariables,
               cancellationToken).ConfigureAwait(false);
 
             stepStopwatch.Stop();
@@ -197,6 +215,7 @@ public sealed class DefaultAgentRunner(
 
             conversationId = updatedConversationId;
             pendingInput = DetermineNextStepInput(stepDefinition, stepInput, executionResult.Output);
+            lastStepOutput = executionResult.Output;
             sharedThreadState = updatedThreadState;
 
             var outcomeResolution = StepOutcomeResolver.ResolveNextStep(definition, stepLookup, stepDefinition, executionResult.Output, _logger);
@@ -258,6 +277,9 @@ public sealed class DefaultAgentRunner(
       string? conversationId,
       IReadOnlyList<AITool> tools,
       JsonElement? threadState,
+      IReadOnlyDictionary<string, string> resolvedParameters,
+      IReadOnlyDictionary<string, string> resolvedOptions,
+      IDictionary<string, string> workflowVariables,
       CancellationToken cancellationToken)
     {
         if (step.Type.Equals("chat", StringComparison.OrdinalIgnoreCase))
@@ -270,17 +292,105 @@ public sealed class DefaultAgentRunner(
               conversationId,
               tools,
               threadState,
+              resolvedParameters,
+              resolvedOptions,
               cancellationToken);
         }
 
         if (step.Type.Equals("echo", StringComparison.OrdinalIgnoreCase))
         {
-            var message = step.Parameters.TryGetValue("message", out var value) ? value : string.Empty;
-            return (new AgentStepExecutionResult(step.Name, step.Type, message), conversationId, threadState, threadState);
+            var message = resolvedParameters.TryGetValue("message", out var value) ? value : string.Empty;
+            return (
+                new AgentStepExecutionResult(step.Name, step.Type, message)
+                {
+                    ResolvedParameters = resolvedParameters,
+                },
+                conversationId,
+                threadState,
+                threadState);
+        }
+
+        if (step.Type.Equals("setVariables", StringComparison.OrdinalIgnoreCase))
+        {
+            var assigned = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var kvp in resolvedParameters)
+            {
+                var resolvedValue = ResolveVariableAssignmentValue(kvp.Value, conversationId);
+                workflowVariables[kvp.Key] = resolvedValue;
+                assigned[kvp.Key] = resolvedValue;
+            }
+
+            return (
+                new AgentStepExecutionResult(step.Name, step.Type, input ?? string.Empty)
+                {
+                    ResolvedParameters = assigned,
+                },
+                conversationId,
+                threadState,
+                threadState);
         }
 
         var fallbackOutput = JsonSerializer.Serialize(step.Parameters);
-        return (new AgentStepExecutionResult(step.Name, step.Type, fallbackOutput), conversationId, threadState, threadState);
+        return (
+            new AgentStepExecutionResult(step.Name, step.Type, fallbackOutput)
+            {
+                ResolvedParameters = resolvedParameters,
+            },
+            conversationId,
+            threadState,
+            threadState);
+    }
+
+    private static string ResolveVariableAssignmentValue(string? value, string? conversationId)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        const string presetPrefix = "$preset:";
+
+        if (!value.StartsWith(presetPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return value;
+        }
+
+        var presetKey = value[presetPrefix.Length..].Trim();
+
+        if (string.IsNullOrEmpty(presetKey))
+        {
+            return string.Empty;
+        }
+
+        var localNow = DateTimeOffset.Now;
+
+        if (presetKey.Equals("CurrentDate", StringComparison.OrdinalIgnoreCase))
+        {
+            return localNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        }
+
+        if (presetKey.Equals("LocalDateTime", StringComparison.OrdinalIgnoreCase))
+        {
+            return localNow.ToString("O", CultureInfo.InvariantCulture);
+        }
+
+        if (presetKey.Equals("UtcDateTime", StringComparison.OrdinalIgnoreCase))
+        {
+            return localNow.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        }
+
+        if (presetKey.Equals("DayOfTheWeek", StringComparison.OrdinalIgnoreCase))
+        {
+            return localNow.ToString("dddd", CultureInfo.InvariantCulture);
+        }
+
+        if (presetKey.Equals("ConversationId", StringComparison.OrdinalIgnoreCase))
+        {
+            return conversationId ?? string.Empty;
+        }
+
+        return value;
     }
 
     private async Task<(AgentStepExecutionResult Result, string? ConversationId, JsonElement? ThreadState, JsonElement? StepThreadContext)> ExecuteChatStepAsync(
@@ -291,14 +401,16 @@ public sealed class DefaultAgentRunner(
       string? conversationId,
       IReadOnlyList<AITool> tools,
       JsonElement? threadState,
+      IReadOnlyDictionary<string, string> resolvedParameters,
+      IReadOnlyDictionary<string, string> resolvedOptions,
       CancellationToken cancellationToken)
     {
-        var instructions = step.Parameters.TryGetValue("systemPrompt", out var systemPrompt) ?
+        var instructions = resolvedParameters.TryGetValue("systemPrompt", out var systemPrompt) ?
           systemPrompt :
           definition.Description ?? "You are a helpful assistant.";
 
         var userMessage = input;
-        if (string.IsNullOrWhiteSpace(userMessage) && step.Parameters.TryGetValue("message", out var fallbackMessage))
+        if (string.IsNullOrWhiteSpace(userMessage) && resolvedParameters.TryGetValue("message", out var fallbackMessage))
         {
             userMessage = fallbackMessage;
         }
@@ -372,6 +484,7 @@ public sealed class DefaultAgentRunner(
             {
                 ToolInvocations = toolAnalysis.ToolCalls,
                 ToolErrorDetected = toolAnalysis.HasErrors,
+                ResolvedParameters = resolvedParameters,
             };
 
             serializedThread ??= agentThread.Serialize();
@@ -391,7 +504,14 @@ public sealed class DefaultAgentRunner(
               [userMessageForStore, fallbackAssistantMessage],
               cancellationToken).ConfigureAwait(false);
 
-            return (new AgentStepExecutionResult(step.Name, step.Type, fallback), conversationContext.ConversationId ?? conversationId, threadState, threadState);
+            return (
+                new AgentStepExecutionResult(step.Name, step.Type, fallback)
+                {
+                    ResolvedParameters = resolvedParameters,
+                },
+                conversationContext.ConversationId ?? conversationId,
+                threadState,
+                threadState);
         }
     }
     private static List<ChatMessage> BuildChatMessages(string? instructions, string userMessage, IEnumerable<AgentMessage>? previousMessages)

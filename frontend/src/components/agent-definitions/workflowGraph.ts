@@ -4,21 +4,18 @@ import type {
   AgentViewLayoutEdge,
   AgentViewLayoutNode,
 } from "../../types/agents";
-import type { WorkflowEdge, WorkflowGraph, WorkflowNode } from "./types";
+import type {
+  WorkflowEdge,
+  WorkflowGraph,
+  WorkflowNode,
+  StepType,
+} from "./types";
 import { isWorkflowDebugLoggingEnabled } from "./utils/workflowDebug";
 
 export const WORKFLOW_EDGE_TYPE = "workflowEdge";
 
 const VERTICAL_SPACING = 160;
 const HORIZONTAL_SPACING = 220;
-
-const TOOL_NODE_STYLE: CSSProperties = {
-  backgroundColor: "rgba(37, 99, 235, 0.12)",
-  border: "1px solid rgba(37, 99, 235, 0.4)",
-  borderRadius: 14,
-  color: "rgb(30, 64, 175)",
-  fontWeight: 600,
-};
 
 const START_NODE_STYLE: CSSProperties = {
   backgroundColor: "rgba(34, 197, 94, 0.15)",
@@ -83,6 +80,7 @@ export function buildWorkflowGraph(agent: AgentDefinition): WorkflowGraph {
   const stepPositions = new Map(
     agent.steps.map((step, index) => [step.name, index])
   );
+  const stepByName = new Map(agent.steps.map((step) => [step.name, step]));
   const incomingByStep = new Map<string, number[]>();
   const stepColumns = new Map<string, number>();
   const layoutPositions: Record<string, AgentViewLayoutNode> =
@@ -124,7 +122,9 @@ export function buildWorkflowGraph(agent: AgentDefinition): WorkflowGraph {
     layoutPositions[startNodeId] ??
     layoutPositions["start"] ??
     layoutPositions[agent.id];
-  const resolvedStartPosition = startPosition ?? { x: 0, y: 0 };
+  const resolvedStartPosition = startPosition
+    ? { x: startPosition.x, y: startPosition.y }
+    : { x: 0, y: 0 };
   const startNodeHasSavedPosition = Boolean(startPosition);
 
   if (workflowDebugLogging) {
@@ -168,31 +168,35 @@ export function buildWorkflowGraph(agent: AgentDefinition): WorkflowGraph {
     const nodeId = `${agent.id}-${step.name}`;
 
     if (!nodeIds.has(nodeId)) {
-      const savedPosition =
+      const savedLayoutNode =
         layoutPositions[nodeId] ?? layoutPositions[step.name];
-      const hasSavedPosition = Boolean(savedPosition);
+      const hasSavedPosition = Boolean(savedLayoutNode);
       const targetIndex = stepPositions.get(step.name) ?? index;
       const incoming = incomingByStep.get(step.name) ?? [];
       const requiresOffset = incoming.some(
         (sourceIndex) => sourceIndex < targetIndex - 1
       );
-      const column = savedPosition
-        ? savedPosition.x / HORIZONTAL_SPACING
+      const column = savedLayoutNode
+        ? savedLayoutNode.x / HORIZONTAL_SPACING
         : requiresOffset
         ? 2
         : 1;
       const clampedColumn = Number.isFinite(column) && column >= 0 ? column : 1;
       const defaultX = HORIZONTAL_SPACING * clampedColumn;
       const defaultY = index * VERTICAL_SPACING;
-      const position = savedPosition ?? { x: defaultX, y: defaultY };
+      const position = savedLayoutNode
+        ? { x: savedLayoutNode.x, y: savedLayoutNode.y }
+        : { x: defaultX, y: defaultY };
 
       nodes.push({
         id: nodeId,
         position,
         data: {
-          label: `${step.name} (${step.type})`,
+          label: step.name,
           kind: "step",
           stepName: step.name,
+          stepType: step.type as StepType,
+          handlePlacement: savedLayoutNode?.handles,
           hasSavedPosition,
         },
         type: "step",
@@ -291,18 +295,20 @@ export function buildWorkflowGraph(agent: AgentDefinition): WorkflowGraph {
         if (!stepNames.has(outcome.nextStep)) {
           if (!placeholderNodes.has(outcome.nextStep)) {
             placeholderNodes.set(outcome.nextStep, normalizedTarget);
-            const savedPosition =
+            const savedLayoutNode =
               layoutPositions[normalizedTarget] ??
               layoutPositions[outcome.nextStep];
-            const hasSavedPosition = Boolean(savedPosition);
+            const hasSavedPosition = Boolean(savedLayoutNode);
             nodes.push({
               id: normalizedTarget,
-              position: savedPosition ?? {
-                x: HORIZONTAL_SPACING * 2,
-                y:
-                  (placeholderNodes.size + terminationNodes.size) *
-                  VERTICAL_SPACING,
-              },
+              position: savedLayoutNode
+                ? { x: savedLayoutNode.x, y: savedLayoutNode.y }
+                : {
+                    x: HORIZONTAL_SPACING * 2,
+                    y:
+                      (placeholderNodes.size + terminationNodes.size) *
+                      VERTICAL_SPACING,
+                  },
               data: {
                 label: `${outcome.nextStep} (missing)`,
                 kind: "placeholder",
@@ -322,10 +328,13 @@ export function buildWorkflowGraph(agent: AgentDefinition): WorkflowGraph {
           const column = savedPosition
             ? savedPosition.x / HORIZONTAL_SPACING
             : stepColumns.get(outcome.nextStep) ?? 1;
-          const position = savedPosition ?? {
-            x: HORIZONTAL_SPACING * column,
-            y: stepIndex * VERTICAL_SPACING,
-          };
+          const position = savedPosition
+            ? { x: savedPosition.x, y: savedPosition.y }
+            : {
+                x: HORIZONTAL_SPACING * column,
+                y: stepIndex * VERTICAL_SPACING,
+              };
+          const targetStep = stepByName.get(outcome.nextStep);
           nodes.push({
             id: normalizedTarget,
             position,
@@ -333,6 +342,8 @@ export function buildWorkflowGraph(agent: AgentDefinition): WorkflowGraph {
               label: `${outcome.nextStep}`,
               kind: "step",
               stepName: outcome.nextStep,
+              stepType: targetStep?.type as StepType | undefined,
+              handlePlacement: savedPosition?.handles,
               hasSavedPosition,
             },
             type: "step",
@@ -403,22 +414,25 @@ export function buildWorkflowGraph(agent: AgentDefinition): WorkflowGraph {
         return;
       }
 
-      const savedPosition = layoutPositions[nodeId] ?? layoutPositions[tool.id];
-      const hasSavedPosition = Boolean(savedPosition);
+      const savedLayoutNode =
+        layoutPositions[nodeId] ?? layoutPositions[tool.id];
+      const hasSavedPosition = Boolean(savedLayoutNode);
       nodes.push({
         id: nodeId,
-        position: savedPosition ?? {
-          x: HORIZONTAL_SPACING * 3.5,
-          y: index * VERTICAL_SPACING,
-        },
+        position: savedLayoutNode
+          ? { x: savedLayoutNode.x, y: savedLayoutNode.y }
+          : {
+              x: HORIZONTAL_SPACING * 3.5,
+              y: index * VERTICAL_SPACING,
+            },
         data: {
-          label: `Tool: ${tool.name ?? tool.id}`,
+          label: tool.name ?? tool.id,
           kind: "tool",
           toolId: tool.id,
           hasSavedPosition,
+          handlePlacement: savedLayoutNode?.handles,
         },
-        type: "default",
-        style: TOOL_NODE_STYLE,
+        type: "tool",
       });
       nodeIds.add(nodeId);
     });

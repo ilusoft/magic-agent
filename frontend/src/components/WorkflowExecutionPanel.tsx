@@ -13,6 +13,38 @@ interface WorkflowExecutionPanelProps {
   messages?: AgentMessage[];
 }
 
+function renderResolvedParameters(
+  resolvedParameters: AgentStepExecutionResult["resolvedParameters"]
+) {
+  if (!resolvedParameters || Object.keys(resolvedParameters).length === 0) {
+    return null;
+  }
+
+  const entries = Object.entries(resolvedParameters).sort(([a], [b]) =>
+    a.localeCompare(b)
+  );
+
+  return (
+    <div className="mt-3">
+      <span className="text-xs font-semibold uppercase text-foreground/60">
+        Resolved Parameters
+      </span>
+      <div className="mt-1 space-y-1 rounded border border-border/50 bg-muted/20 p-2 text-sm">
+        {entries.map(([key, value]) => (
+          <div key={key} className="grid gap-1 sm:grid-cols-5">
+            <span className="font-medium text-foreground/80 sm:col-span-2">
+              {key}
+            </span>
+            <span className="sm:col-span-3 whitespace-pre-wrap text-foreground/90">
+              {value}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 interface UserPromptSummary {
   content: string;
   timestampMs: number | null;
@@ -370,6 +402,10 @@ export function WorkflowExecutionPanel({
                               </div>
 
                               {renderThreadContext(step.threadContext)}
+
+                              {renderResolvedParameters(
+                                step.resolvedParameters
+                              )}
 
                               {renderToolInvocations(step)}
                             </li>

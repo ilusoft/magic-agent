@@ -86,13 +86,13 @@
               "order": 4
             }
           ],
-          "isStartStep": true
+          "isStartStep": false
         },
         {
           "name": "Research Agent",
           "type": "chat",
           "parameters": {
-            "systemPrompt": "You are an inventory research assistant for ticket brokers. \n\nGoals:\n- Use the available tools to help users to get data to answer their question about productions, inventory and their pricing strategies. \n- Plan the execution of the tasks to minimize the calls to the tools and be as exact with the answer to the user as possible.\n- If the request requires too many tool requests. Stop and ask the user for narrowing the criteria to research data.\n\nOutput:\n- Return the results of your research in JSON format with an extra property called : \u0022notes\u0022 that will have the values \u0022has-data\u0022 if we found information as part of the research or \u0022no-data\u0022 if nothing useful was found as part of the research or \u0022error\u0022 if the tool request was not successful.",
+            "systemPrompt": "You are an inventory research assistant for ticket brokers. \n\nToday\u0027s date is: {{var.currentDate}} \n\nGoals:\n- Use the available tools to help users to get data to answer their question about productions, inventory and their pricing strategies. \n- Plan the execution of the tasks to minimize the calls to the tools and be as exact with the answer to the user as possible.\n- If the request requires too many tool requests. Stop and ask the user for narrowing the criteria to research data.\n\nOutput:\n- Return the results of your research in JSON format with an extra property called : \u0022notes\u0022 that will have the values \u0022has-data\u0022 if we found information as part of the research or \u0022no-data\u0022 if nothing useful was found as part of the research or \u0022error\u0022 if the tool request was not successful.",
             "message": ""
           },
           "provider": "azure-openai",
@@ -102,7 +102,8 @@
           },
           "tools": [
             "ProductionsSearchTool",
-            "PricingTools"
+            "PricingTools",
+            "research-data-tools"
           ],
           "stopOnToolError": false,
           "inputSource": "usePrevious",
@@ -136,7 +137,8 @@
           "name": "Summarize Research Results",
           "type": "chat",
           "parameters": {
-            "systemPrompt": "Summarize the conversation so far for the broker. If provided with structured inventory data, present the key items and guidance in natural language."
+            "systemPrompt": "You are a summarization assistant in a ticket broker management system.\n\nGoal and constraints:\n- Summarize the information found in the input data in simple language.\n- Use the context of the conversation to add helpful details to the user.\n- Add some helpful insights and guidance extracted from the information extracted up to this point.\n- Add some potential next steps they can take to continue working with the system (i.e. Create/update pricing groups, remove groups, research other productions and inventory.... ).\n- Keep the summarization and insights as brief as possible. Maximum 3 bullets per item.",
+            "message": ""
           },
           "provider": "azure-openai",
           "options": {},
@@ -317,13 +319,36 @@
             }
           ],
           "isStartStep": false
+        },
+        {
+          "name": "Set Initial Variables",
+          "type": "setVariables",
+          "parameters": {
+            "currentDate": "$preset:CurrentDate"
+          },
+          "provider": "azure-openai",
+          "options": {},
+          "conversation": null,
+          "tools": [],
+          "stopOnToolError": false,
+          "inputSource": "usePrevious",
+          "outcomes": [
+            {
+              "name": "init",
+              "nextStep": "Security and Classification",
+              "condition": null,
+              "endWorkflow": false,
+              "order": 1
+            }
+          ],
+          "isStartStep": true
         }
       ],
       "tools": [
         {
-          "id": "PricingTools",
+          "id": "research-data-tools",
           "type": "mcp",
-          "name": "Tools to research pricing data",
+          "name": "Research Data",
           "description": "Searches the database for productions and inventory for the current broker",
           "serverUrl": "{PRQX_MCP_SERVER_URL}",
           "protocol": "auto",
@@ -343,7 +368,7 @@
         {
           "id": "create-pricing-group-tools",
           "type": "mcp",
-          "name": "Create Pricing Group Tools",
+          "name": "Create PG",
           "description": "Tools required to create pricing groups",
           "serverUrl": "{PRQX_MCP_SERVER_URL}",
           "protocol": "auto",
@@ -362,7 +387,7 @@
         {
           "id": "edit-pricing-tool",
           "type": "mcp",
-          "name": "Modify Pricing Groups Tool",
+          "name": "Modify PG",
           "description": "Allow modifications or removal of existent pricing groups",
           "serverUrl": "{PRQX_MCP_SERVER_URL}",
           "protocol": "auto",
@@ -385,111 +410,124 @@
         "nodes": {
           "search-inventory-agent-start": {
             "x": 311,
-            "y": -169
+            "y": -329,
+            "handles": null
           },
           "search-inventory-agent-termination-risk_notified": {
-            "x": -105,
-            "y": 279
-          },
-          "search-inventory-agent-tool-PricingTools": {
-            "x": 437,
-            "y": 243
+            "x": -153,
+            "y": 263,
+            "handles": null
           },
           "search-inventory-agent-Security and Classification": {
-            "x": 212.5,
-            "y": -23
-          },
-          "Security and Classification": {
-            "x": 212.5,
-            "y": -23
+            "x": 192,
+            "y": -65,
+            "handles": null
           },
           "search-inventory-agent-Research Agent": {
-            "x": 247,
-            "y": 137
-          },
-          "Research Agent": {
-            "x": 247,
-            "y": 137
+            "x": 233,
+            "y": 127,
+            "handles": null
           },
           "search-inventory-agent-Create Agent": {
-            "x": 607.5,
-            "y": 137
-          },
-          "Create Agent": {
-            "x": 607.5,
-            "y": 137
+            "x": 595,
+            "y": 127,
+            "handles": null
           },
           "search-inventory-agent-Summarize Research Results": {
-            "x": 204.5,
-            "y": 329
-          },
-          "Summarize Research Results": {
-            "x": 204.5,
-            "y": 329
+            "x": 183,
+            "y": 335,
+            "handles": null
           },
           "search-inventory-agent-Edit Agent": {
-            "x": 920.5,
-            "y": 137
-          },
-          "Edit Agent": {
-            "x": 920.5,
-            "y": 137
+            "x": 957.5,
+            "y": 127,
+            "handles": null
           },
           "search-inventory-agent-tool-create-pricing-group-tools": {
-            "x": 773,
-            "y": 243
+            "x": 768,
+            "y": 223,
+            "handles": {
+              "input": "Top",
+              "outcomes": null,
+              "tools": null
+            }
           },
           "search-inventory-agent-tool-edit-pricing-tool": {
-            "x": 1077,
-            "y": 243
+            "x": 1151,
+            "y": 223,
+            "handles": {
+              "input": "Top",
+              "outcomes": null,
+              "tools": null
+            }
           },
           "search-inventory-agent-termination-finish_research": {
             "x": 311,
-            "y": 471
+            "y": 487,
+            "handles": null
           },
           "search-inventory-agent-Summarize Edition Task": {
-            "x": 877,
-            "y": 329
+            "x": 906.5,
+            "y": 335,
+            "handles": null
           },
           "search-inventory-agent-termination-finish_edition": {
-            "x": 967,
-            "y": 471
+            "x": 1015,
+            "y": 487,
+            "handles": null
           },
           "search-inventory-agent-Escalate Risk": {
-            "x": -162.5,
-            "y": 105
-          },
-          "Escalate Risk": {
-            "x": -162.5,
-            "y": 105
+            "x": -221,
+            "y": 111,
+            "handles": null
           },
           "search-inventory-agent-Summarize Creation Task": {
-            "x": 568,
-            "y": 329
+            "x": 548.5,
+            "y": 335,
+            "handles": null
           },
           "search-inventory-agent-termination-finish_creation": {
             "x": 663,
-            "y": 471
+            "y": 487,
+            "handles": null
           },
           "search-inventory-agent-termination-finish_no_result": {
-            "x": 39,
-            "y": 471
+            "x": -25,
+            "y": 487,
+            "handles": null
           },
           "search-inventory-agent-No results message": {
-            "x": -39.5,
-            "y": 329
+            "x": -117.5,
+            "y": 335,
+            "handles": null
+          },
+          "search-inventory-agent-Set Initial Variables": {
+            "x": 220.5,
+            "y": -209,
+            "handles": null
+          },
+          "search-inventory-agent-tool-research-data-tools": {
+            "x": 399,
+            "y": 223,
+            "handles": {
+              "input": "Top",
+              "outcomes": null,
+              "tools": null
+            }
           }
         },
         "edges": {
           "search-inventory-agent-Security and Classification-default": {
             "controlPoints": [
               {
-                "x": 178.83161013401613,
-                "y": 47.62105083773979
+                "x": 176,
+                "y": 32,
+                "handles": null
               },
               {
-                "x": -80,
-                "y": 48
+                "x": -128,
+                "y": 32,
+                "handles": null
               }
             ]
           },
@@ -497,11 +535,13 @@
             "controlPoints": [
               {
                 "x": 176,
-                "y": 80
+                "y": 80,
+                "handles": null
               },
               {
-                "x": 32,
-                "y": 80
+                "x": -48,
+                "y": 80,
+                "handles": null
               }
             ]
           },
@@ -509,15 +549,17 @@
             "controlPoints": [
               {
                 "x": 512,
-                "y": 176
+                "y": 176,
+                "handles": null
               }
             ]
           },
           "search-inventory-agent-Research Agent-no_results": {
             "controlPoints": [
               {
-                "x": 64,
-                "y": 208
+                "x": 0,
+                "y": 224,
+                "handles": null
               }
             ]
           },
@@ -525,15 +567,17 @@
             "controlPoints": [
               {
                 "x": 336,
-                "y": 208
+                "y": 208,
+                "handles": null
               }
             ]
           },
           "search-inventory-agent-Security and Classification-editor_handoff": {
             "controlPoints": [
               {
-                "x": 992,
-                "y": 32
+                "x": 1040,
+                "y": 32,
+                "handles": null
               }
             ]
           },
@@ -541,7 +585,8 @@
             "controlPoints": [
               {
                 "x": 688,
-                "y": 48
+                "y": 48,
+                "handles": null
               }
             ]
           },
@@ -549,15 +594,17 @@
             "controlPoints": [
               {
                 "x": 848,
-                "y": 176
+                "y": 176,
+                "handles": null
               }
             ]
           },
           "search-inventory-agent-Edit Agent-tool-edit-pricing-tool": {
             "controlPoints": [
               {
-                "x": 1152,
-                "y": 176
+                "x": 1232,
+                "y": 176,
+                "handles": null
               }
             ]
           },
@@ -565,31 +612,26 @@
             "controlPoints": [
               {
                 "x": 688,
-                "y": 208
+                "y": 208,
+                "handles": null
               }
             ]
           },
           "search-inventory-agent-Edit Agent-edition_complete": {
             "controlPoints": [
               {
-                "x": 992,
-                "y": 208
-              }
-            ]
-          },
-          "search-inventory-agent-start-search-inventory-agent-Security and Classification": {
-            "controlPoints": [
-              {
-                "x": 336,
-                "y": -96
+                "x": 1040,
+                "y": 208,
+                "handles": null
               }
             ]
           },
           "search-inventory-agent-Escalate Risk-risk_notified": {
             "controlPoints": [
               {
-                "x": -80,
-                "y": 208
+                "x": -128,
+                "y": 208,
+                "handles": null
               }
             ]
           },
@@ -597,17 +639,37 @@
             "controlPoints": [
               {
                 "x": 336,
-                "y": 48
+                "y": 48,
+                "handles": null
+              }
+            ]
+          },
+          "search-inventory-agent-Set Initial Variables-init": {
+            "controlPoints": [
+              {
+                "x": 336,
+                "y": -96,
+                "handles": null
+              }
+            ]
+          },
+          "search-inventory-agent-Research Agent-tool-research-data-tools": {
+            "controlPoints": [
+              {
+                "x": 496,
+                "y": 176,
+                "handles": null
               }
             ]
           }
         },
         "viewport": {
           "position": {
-            "x": 243.27155674417645,
-            "y": 354.5086380243556
+            "x": 398.32253700237663,
+            "y": 349.7961477232684,
+            "handles": null
           },
-          "zoom": 1.1983375993212357
+          "zoom": 0.9491817418946925
         }
       },
       "streaming": {
@@ -645,18 +707,21 @@
         "nodes": {
           "qualify-pricing-production-start": {
             "x": 279,
-            "y": -169
+            "y": -169,
+            "handles": null
           },
           "qualify-pricing-production-entryQuestion": {
             "x": 220,
-            "y": -39
+            "y": -39,
+            "handles": null
           }
         },
         "edges": {},
         "viewport": {
           "position": {
             "x": 122.88484272750145,
-            "y": 612.8385255086037
+            "y": 612.8385255086037,
+            "handles": null
           },
           "zoom": 2
         }
