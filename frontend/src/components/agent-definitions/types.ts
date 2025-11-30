@@ -69,14 +69,9 @@ export interface KeyValueEntry {
   value: string;
 }
 
-export type StepType = "chat" | "echo" | "pass-through" | "setVariables";
+export type StepType = "chat" | "echo" | "setVariables";
 
-export const STEP_TYPE_OPTIONS: StepType[] = [
-  "chat",
-  "echo",
-  "pass-through",
-  "setVariables",
-];
+export const STEP_TYPE_OPTIONS: StepType[] = ["chat", "echo", "setVariables"];
 
 export interface StepFormState {
   name: string;

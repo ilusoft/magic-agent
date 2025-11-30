@@ -6,6 +6,7 @@ import { STEP_TYPE_VISUALS } from "./stepTypeVisuals";
 interface WorkflowToolboxProps {
   disabled: boolean;
   onAddStep: () => void;
+  onAddEchoStep: () => void;
   onAddVariableStep: () => void;
   onAddOutcome: () => void;
   onAddTool: () => void;
@@ -14,6 +15,7 @@ interface WorkflowToolboxProps {
 }
 
 const CHAT_STEP_VISUAL = STEP_TYPE_VISUALS.chat;
+const ECHO_STEP_VISUAL = STEP_TYPE_VISUALS.echo;
 const VARIABLE_STEP_VISUAL = STEP_TYPE_VISUALS.setVariables;
 
 const TOOLBOX_ACTIONS = [
@@ -21,6 +23,11 @@ const TOOLBOX_ACTIONS = [
     label: CHAT_STEP_VISUAL.toolboxLabel,
     icon: CHAT_STEP_VISUAL.icon,
     action: (props: WorkflowToolboxProps) => props.onAddStep(),
+  },
+  {
+    label: ECHO_STEP_VISUAL.toolboxLabel,
+    icon: ECHO_STEP_VISUAL.icon,
+    action: (props: WorkflowToolboxProps) => props.onAddEchoStep(),
   },
   {
     label: VARIABLE_STEP_VISUAL.toolboxLabel,

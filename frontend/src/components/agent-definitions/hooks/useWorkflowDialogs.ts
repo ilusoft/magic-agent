@@ -19,9 +19,10 @@ export function useWorkflowDialogs({
   applyDocumentUpdate,
 }: UseWorkflowDialogsOptions) {
   const {
-    dialogProps: stepDialogProps,
+    dialogProps,
     openForEditing: openStepDialogForNode,
     openForCreation: openStepDialogForCreation,
+    openForEchoCreation,
     openForVariableCreation,
   } = useStepDialog({
     draftDocument,
@@ -50,9 +51,10 @@ export function useWorkflowDialogs({
   });
 
   return {
-    stepDialogProps,
+    stepDialogProps: dialogProps,
     openStepDialogForNode,
     openStepDialogForCreation,
+    openEchoStepDialogForCreation: openForEchoCreation,
     openVariableStepDialogForCreation: openForVariableCreation,
     toolDialogProps,
     openToolDialogForNode,

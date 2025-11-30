@@ -33,13 +33,16 @@ interface UseStepDialogOptions {
 const STEP_TYPE_PARAMETER_TEMPLATES: Record<StepType, string[]> = {
   chat: ["systemPrompt", "message"],
   echo: ["message"],
-  "pass-through": [],
   setVariables: [],
 };
 
 const DEFAULT_STEP_TYPE: StepType = "chat";
 
 function coerceStepType(value: string | undefined): StepType {
+  if (value === "pass-through") {
+    return "setVariables";
+  }
+
   if (value && STEP_TYPE_OPTIONS.includes(value as StepType)) {
     return value as StepType;
   }
@@ -146,37 +149,37 @@ function renameLayoutEdgeKeys(
   });
 }
 
-interface StepDialogBindings {
-  open: boolean;
-  mode: "create" | "edit";
-  title: string;
-  stepForm: StepFormState | null;
-  stepFormError: string | null;
-  onClose: () => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onFieldChange: (
-    field: "name" | "type"
-  ) => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void;
-  onConversationToggle: (event: ChangeEvent<HTMLInputElement>) => void;
-  onAddParameter: () => void;
-  onRemoveParameter: (entryId: string) => void;
-  onParameterChange: (
-    entryId: string,
-    field: "key" | "value"
-  ) => (event: ChangeEvent<HTMLInputElement>) => void;
-  availableTools: { id: string; label: string }[];
-  onToolToggle: (
-    toolId: string
-  ) => (event: ChangeEvent<HTMLInputElement>) => void;
-  onDelete?: () => void;
-}
-
 interface UseStepDialogResult {
-  dialogProps: StepDialogBindings;
+  dialogProps: {
+    open: boolean;
+    mode: "create" | "edit";
+    title: string;
+    stepForm: StepFormState | null;
+    stepFormError: string | null;
+    workflowParameters: KeyValueEntry[];
+    onClose: () => void;
+    onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+    onFieldChange: (
+      field: "name" | "type"
+    ) => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void;
+    onConversationToggle: (event: ChangeEvent<HTMLInputElement>) => void;
+    onAddParameter: () => void;
+    onRemoveParameter: (entryId: string) => void;
+    onParameterChange: (
+      entryId: string,
+      field: "key" | "value"
+    ) => (event: ChangeEvent<HTMLInputElement>) => void;
+    availableTools: { id: string; label: string }[];
+    onToolToggle: (
+      toolId: string
+    ) => (event: ChangeEvent<HTMLInputElement>) => void;
+    onDelete?: () => void;
+  };
   title: string;
   open: boolean;
   openForEditing: (workflowNode: WorkflowNode) => void;
   openForCreation: () => void;
+  openForEchoCreation: () => void;
   openForVariableCreation: () => void;
   reset: () => void;
 }
@@ -209,6 +212,23 @@ export function useStepDialog({
     return agent.tools
       .filter((tool): tool is AgentToolDefinition => Boolean(tool?.id))
       .map((tool) => ({ id: tool.id, label: tool.name?.trim() || tool.id }));
+  }, [draftDocument, activeWorkflowId]);
+
+  const workflowParameters = useMemo(() => {
+    if (!draftDocument || !activeWorkflowId) {
+      return [] as KeyValueEntry[];
+    }
+
+    const agent = draftDocument.agents.find(
+      (candidate) => candidate.id === activeWorkflowId
+    );
+
+    if (!agent) {
+      return [] as KeyValueEntry[];
+    }
+
+    const parameterEntries = entriesFromRecord(agent.defaultParameters);
+    return parameterEntries.length > 0 ? parameterEntries : [];
   }, [draftDocument, activeWorkflowId]);
 
   const reset = useCallback(() => {
@@ -277,8 +297,7 @@ export function useStepDialog({
     [draftDocument, activeWorkflowId]
   );
 
-  const openForCreation = useCallback(() => {
-    const initialType = DEFAULT_STEP_TYPE;
+  const openForTypeCreation = useCallback((initialType: StepType) => {
     setStepForm({
       name: "",
       type: initialType,
@@ -293,21 +312,20 @@ export function useStepDialog({
     setIsOpen(true);
   }, []);
 
-  const openForVariableCreation = useCallback(() => {
-    const initialType: StepType = "setVariables";
-    setStepForm({
-      name: "",
-      type: initialType,
-      conversationEnabled: false,
-      parameters: ensureParametersForStepType(initialType, []),
-      tools: [],
-    });
-    setStepFormError(null);
-    setStepOriginalName(null);
-    setMode("create");
-    setDialogTarget(null);
-    setIsOpen(true);
-  }, []);
+  const openForCreation = useCallback(
+    () => openForTypeCreation("chat"),
+    [openForTypeCreation]
+  );
+
+  const openForEchoCreation = useCallback(
+    () => openForTypeCreation("echo"),
+    [openForTypeCreation]
+  );
+
+  const openForVariableCreation = useCallback(
+    () => openForTypeCreation("setVariables"),
+    [openForTypeCreation]
+  );
 
   const handleFieldChange = useCallback(
     (field: "name" | "type") =>
@@ -597,6 +615,7 @@ export function useStepDialog({
       title,
       stepForm,
       stepFormError,
+      workflowParameters: workflowParameters,
       onClose: reset,
       onSubmit: handleSubmit,
       onFieldChange: handleFieldChange,
@@ -612,6 +631,7 @@ export function useStepDialog({
     open: isOpen,
     openForEditing,
     openForCreation,
+    openForEchoCreation,
     openForVariableCreation,
     reset,
   };

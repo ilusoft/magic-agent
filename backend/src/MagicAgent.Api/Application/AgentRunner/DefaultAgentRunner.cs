@@ -188,12 +188,19 @@ public sealed class DefaultAgentRunner(
             var resolvedParameters = WorkflowPlaceholderResolver.ResolveDictionary(
                 stepDefinition.Parameters,
                 workflowVariables,
+                parameters,
                 stepInput,
                 lastStepOutput);
 
+            // resolvedOptions are forwarded to every step—even if the current implementation does not
+            // consume them—so future step types (e.g. tool invocations, scripted actions, advanced
+            // chat settings) can rely on workflow-defined execution options without needing new
+            // plumbing. Keeping the resolved dictionary in place also mirrors the Agent Framework
+            // contract which separates parameters (content) from options (execution knobs).
             var resolvedOptions = WorkflowPlaceholderResolver.ResolveDictionary(
                 stepDefinition.Options,
                 workflowVariables,
+                parameters,
                 stepInput,
                 lastStepOutput);
 

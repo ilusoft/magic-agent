@@ -202,6 +202,7 @@ export function AgentDefinitionsView({
     stepDialogProps,
     openStepDialogForNode,
     openStepDialogForCreation,
+    openEchoStepDialogForCreation,
     openVariableStepDialogForCreation,
     toolDialogProps,
     openToolDialogForNode,
@@ -364,6 +365,7 @@ export function AgentDefinitionsView({
               <WorkflowBuilderPanel
                 disabled={toolboxDisabled}
                 onAddStep={openStepDialogForCreation}
+                onAddEchoStep={openEchoStepDialogForCreation}
                 onAddVariableStep={openVariableStepDialogForCreation}
                 onAddOutcome={handleAddOutcome}
                 onAddTool={openToolDialogForCreation}

@@ -18,12 +18,7 @@ export interface StepTypeVisualConfig {
   handleColor: string;
 }
 
-export const STEP_TYPE_ORDER: StepType[] = [
-  "chat",
-  "echo",
-  "pass-through",
-  "setVariables",
-];
+export const STEP_TYPE_ORDER: StepType[] = ["chat", "echo", "setVariables"];
 
 export const STEP_TYPE_VISUALS: Record<StepType, StepTypeVisualConfig> = {
   chat: {
@@ -43,15 +38,6 @@ export const STEP_TYPE_VISUALS: Record<StepType, StepTypeVisualConfig> = {
     nodeClass: "border-amber-200 bg-amber-50 text-amber-900",
     iconWrapperClass: "bg-amber-100 text-amber-600",
     handleColor: "rgb(245 158 11)",
-  },
-  "pass-through": {
-    type: "pass-through",
-    icon: ArrowRightLeft,
-    label: "Pass-through",
-    toolboxLabel: "Pass-through Step",
-    nodeClass: "border-violet-200 bg-violet-50 text-violet-900",
-    iconWrapperClass: "bg-violet-100 text-violet-600",
-    handleColor: "rgb(139 92 246)",
   },
   setVariables: {
     type: "setVariables",
