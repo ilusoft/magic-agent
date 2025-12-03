@@ -1,10 +1,12 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 using ChatRole = Microsoft.Extensions.AI.ChatRole;
+using MagicAgent.Api.Application.Expressions;
 
 namespace MagicAgent.Api.Application.AgentRunner;
 
@@ -17,7 +19,8 @@ public sealed class DefaultAgentRunner(
   IAgentConversationStore conversationStore,
   IAgentDiagnosticsStore diagnosticsStore,
   IAgentRunProgressSink progressSink,
-  ILogger<DefaultAgentRunner> logger) : IAgentRunner
+  ILogger<DefaultAgentRunner> logger,
+  IWorkflowExpressionEvaluator expressionEvaluator) : IAgentRunner
 {
     private readonly IAgentDefinitionsProvider _definitionsProvider =
       definitionsProvider ?? throw new ArgumentNullException(nameof(definitionsProvider));
@@ -31,6 +34,8 @@ public sealed class DefaultAgentRunner(
       progressSink ?? throw new ArgumentNullException(nameof(progressSink));
     private readonly ILogger<DefaultAgentRunner> _logger =
       logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IWorkflowExpressionEvaluator _expressionEvaluator =
+      expressionEvaluator ?? throw new ArgumentNullException(nameof(expressionEvaluator));
     private const int MaxWorkflowSteps = 100;
     private static readonly JsonSerializerOptions PassThroughSerializerOptions = new(JsonSerializerDefaults.Web);
 
@@ -229,7 +234,20 @@ public sealed class DefaultAgentRunner(
             lastStepOutput = executionResult.Output;
             sharedThreadState = updatedThreadState;
 
-            var outcomeResolution = StepOutcomeResolver.ResolveNextStep(definition, stepLookup, stepDefinition, executionResult.Output, _logger);
+            var expressionVariables = BuildVariableExpressionValues(workflowVariables, workflowVariableStates);
+            var expressionParameters = BuildParameterExpressionValues(parameters);
+
+            var outcomeResolution = StepOutcomeResolver.ResolveNextStep(
+                definition,
+                stepLookup,
+                stepDefinition,
+                stepInput,
+                executionResult.Output,
+                lastStepOutput,
+                expressionVariables,
+                expressionParameters,
+                _expressionEvaluator,
+                _logger);
 
             var enrichedResult = executionResult with
             {
@@ -465,12 +483,24 @@ public sealed class DefaultAgentRunner(
                 try
                 {
                     using var document = JsonDocument.Parse(rawValue);
-                    converted = JsonSerializer.Serialize(document.RootElement, PassThroughSerializerOptions);
+                    converted = document.RootElement.GetRawText();
+                    error = null;
                 }
                 catch (JsonException)
                 {
-                    error = "Unable to parse JSON. Stored original string.";
-                    targetType = WorkflowVariableDataType.String;
+                    error = "Enter valid JSON (object or array).";
+                }
+                break;
+
+            case WorkflowVariableDataType.Boolean:
+                if (bool.TryParse(rawValue, out var booleanValue))
+                {
+                    converted = booleanValue ? "true" : "false";
+                    error = null;
+                }
+                else
+                {
+                    error = "Enter either true or false.";
                 }
                 break;
 
@@ -487,6 +517,88 @@ public sealed class DefaultAgentRunner(
         string ConvertedValue,
         WorkflowVariableDataType Type,
         string? Error);
+
+    private static IReadOnlyDictionary<string, WorkflowExpressionValue> BuildParameterExpressionValues(IDictionary<string, string> parameters)
+    {
+        if (parameters.Count == 0)
+        {
+            return new Dictionary<string, WorkflowExpressionValue>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var map = new Dictionary<string, WorkflowExpressionValue>(parameters.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in parameters)
+        {
+            map[kvp.Key] = WorkflowExpressionValue.FromString(kvp.Value);
+        }
+
+        return map;
+    }
+
+    private static IReadOnlyDictionary<string, WorkflowExpressionValue> BuildVariableExpressionValues(
+        IDictionary<string, string> rawVariables,
+        IDictionary<string, WorkflowVariableState> states)
+    {
+        if (rawVariables.Count == 0 && states.Count == 0)
+        {
+            return new Dictionary<string, WorkflowExpressionValue>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var map = new Dictionary<string, WorkflowExpressionValue>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var kvp in rawVariables)
+        {
+            map[kvp.Key] = WorkflowExpressionValue.FromString(kvp.Value);
+        }
+
+        foreach (var kvp in states)
+        {
+            map[kvp.Key] = ConvertStateToExpressionValue(kvp.Value);
+        }
+
+        return map;
+    }
+
+    private static WorkflowExpressionValue ConvertStateToExpressionValue(WorkflowVariableState state)
+    {
+        var value = state.ConvertedValue ?? string.Empty;
+
+        return state.Type switch
+        {
+            WorkflowVariableDataType.Number => double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)
+                ? WorkflowExpressionValue.FromNumber(number)
+                : WorkflowExpressionValue.FromString(value),
+            WorkflowVariableDataType.Boolean => bool.TryParse(value, out var boolean)
+                ? WorkflowExpressionValue.FromBoolean(boolean)
+                : WorkflowExpressionValue.FromString(value),
+            WorkflowVariableDataType.Json => TryParseJson(value, out var node)
+                ? WorkflowExpressionValue.FromJson(node)
+                : WorkflowExpressionValue.FromString(value),
+            WorkflowVariableDataType.DateTime => DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dateTime)
+                ? WorkflowExpressionValue.FromDateTime(dateTime)
+                : WorkflowExpressionValue.FromString(value),
+            _ => WorkflowExpressionValue.FromString(value),
+        };
+    }
+
+    private static bool TryParseJson(string value, out JsonNode? node)
+    {
+        node = null;
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        try
+        {
+            node = JsonNode.Parse(value);
+            return node is not null;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 
     private async Task<(AgentStepExecutionResult Result, string? ConversationId, JsonElement? ThreadState, JsonElement? StepThreadContext)> ExecuteChatStepAsync(
       AgentDefinition definition,

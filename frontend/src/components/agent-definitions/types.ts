@@ -92,9 +92,13 @@ export interface OutcomeFormState {
   name: string;
   nextStep: string;
   endWorkflow: boolean;
-  conditionType: string;
-  conditionParameters: KeyValueEntry[];
+  expression: string;
   order: string;
+}
+
+export interface ExpressionValidationState {
+  status: "idle" | "pending" | "valid" | "invalid";
+  message?: string | null;
 }
 
 export interface ToolFormState {

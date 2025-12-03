@@ -78,6 +78,64 @@ public static class StringWorkflowHelpers
         return array;
     }
 
+    [WorkflowHelper("contains", ReturnType = WorkflowExpressionValueKind.Boolean, Description = "Returns true when the value contains the provided search term (case-sensitive).")]
+    [WorkflowHelperParameter("value", Description = "Input string.")]
+    [WorkflowHelperParameter("searchValue", Description = "Substring to locate within the input.")]
+    public static bool Contains(string value, string searchValue)
+    {
+        var source = value ?? string.Empty;
+        var term = searchValue ?? string.Empty;
+        return term.Length == 0 || source.IndexOf(term, StringComparison.Ordinal) >= 0;
+    }
+
+    [WorkflowHelper("startsWith", ReturnType = WorkflowExpressionValueKind.Boolean, Description = "Returns true when the value starts with the provided prefix (case-sensitive).")]
+    [WorkflowHelperParameter("value", Description = "Input string.")]
+    [WorkflowHelperParameter("searchValue", Description = "Prefix to evaluate.")]
+    public static bool StartsWith(string value, string searchValue)
+    {
+        var source = value ?? string.Empty;
+        var prefix = searchValue ?? string.Empty;
+        return source.StartsWith(prefix, StringComparison.Ordinal);
+    }
+
+    [WorkflowHelper("endsWith", ReturnType = WorkflowExpressionValueKind.Boolean, Description = "Returns true when the value ends with the provided suffix (case-sensitive).")]
+    [WorkflowHelperParameter("value", Description = "Input string.")]
+    [WorkflowHelperParameter("searchValue", Description = "Suffix to evaluate.")]
+    public static bool EndsWith(string value, string searchValue)
+    {
+        var source = value ?? string.Empty;
+        var suffix = searchValue ?? string.Empty;
+        return source.EndsWith(suffix, StringComparison.Ordinal);
+    }
+
+    [WorkflowHelper("compare", ReturnType = WorkflowExpressionValueKind.Boolean, Description = "Compares two strings with optional trimming and case sensitivity.")]
+    [WorkflowHelperParameter("value", Description = "First value to compare.")]
+    [WorkflowHelperParameter("other", Description = "Second value to compare.")]
+    [WorkflowHelperParameter("caseSensitive", Description = "If true, performs a case-sensitive comparison.", IsOptional = true)]
+    [WorkflowHelperParameter("trimWhitespace", Description = "If true, trims both values before comparison.", IsOptional = true)]
+    public static bool Compare(string value, string other, bool caseSensitive = false, bool trimWhitespace = false)
+    {
+        var first = value ?? string.Empty;
+        var second = other ?? string.Empty;
+
+        if (trimWhitespace)
+        {
+            first = first.Trim();
+            second = second.Trim();
+        }
+
+        var comparison = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        return string.Equals(first, second, comparison);
+    }
+
+    [WorkflowHelper("isNullOrEmpty", ReturnType = WorkflowExpressionValueKind.Boolean, Description = "Returns true when the string is null or empty.")]
+    [WorkflowHelperParameter("value", Description = "Input string.")]
+    public static bool IsNullOrEmpty(string value) => string.IsNullOrEmpty(value);
+
+    [WorkflowHelper("isNull", ReturnType = WorkflowExpressionValueKind.Boolean, Description = "Returns true when the provided expression evaluates to null.")]
+    [WorkflowHelperParameter("value", Description = "Value to inspect.")]
+    public static bool IsNull(WorkflowExpressionValue value) => value is null || value.Kind == WorkflowExpressionValueKind.Null;
+
     private static int ClampIndex(int index, int length)
     {
         if (length <= 0)

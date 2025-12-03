@@ -69,6 +69,12 @@ function validateValueForType(
     }
   }
 
+  if (type === "boolean") {
+    return ["true", "false"].includes(trimmed.toLowerCase())
+      ? null
+      : "Enter either true or false.";
+  }
+
   return null;
 }
 
@@ -121,6 +127,7 @@ const VARIABLE_TYPE_HELP_TEXT: Record<WorkflowVariableDataType, string> = {
   dateTime:
     "Parses ISO 8601 timestamps (e.g., 2024-05-01T10:00:00Z or local presets).",
   json: "Validates JSON objects/arrays and stores a normalized string.",
+  boolean: "Accepts either true or false (case-insensitive).",
 };
 
 export function VariableStepDialog(props: StepDialogBaseProps) {
@@ -385,8 +392,9 @@ function VariableParameterRow({
             >
               <option value="string">String</option>
               <option value="number">Number</option>
-              <option value="dateTime">Date & Time</option>
+              <option value="dateTime">Date &amp; Time</option>
               <option value="json">JSON</option>
+              <option value="boolean">Boolean</option>
             </select>
           </div>
         ) : (

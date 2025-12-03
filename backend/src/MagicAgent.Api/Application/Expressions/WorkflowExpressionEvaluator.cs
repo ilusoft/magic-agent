@@ -141,6 +141,12 @@ internal sealed class WorkflowExpressionEvaluator : IWorkflowExpressionEvaluator
                 return WorkflowExpressionValue.FromString(_context.LastStepOutput ?? string.Empty);
             }
 
+            if (_context.RuntimeState.TryGetValue(name, out var runtimeValue))
+            {
+                RecordReference($"state.{name}");
+                return runtimeValue;
+            }
+
             if (_context.Variables.TryGetValue(name, out var variableValue))
             {
                 RecordReference($"var.{name}");
@@ -259,6 +265,11 @@ internal sealed class WorkflowExpressionEvaluator : IWorkflowExpressionEvaluator
                 return resolved;
             }
 
+            if (targetValue.Kind == WorkflowExpressionValueKind.Json)
+            {
+                return WorkflowExpressionValue.Null();
+            }
+
             if (targetValue.Kind == WorkflowExpressionValueKind.String &&
                 string.Equals(member.MemberName, "length", StringComparison.OrdinalIgnoreCase))
             {
@@ -344,6 +355,19 @@ internal sealed class WorkflowExpressionEvaluator : IWorkflowExpressionEvaluator
                 {
                     value = parameterValue;
                     RecordReference($"param.{memberName}");
+                    return true;
+                }
+
+                value = WorkflowExpressionValue.Null();
+                return true;
+            }
+
+            if (string.Equals(scopeName, "state", StringComparison.OrdinalIgnoreCase))
+            {
+                if (_context.RuntimeState.TryGetValue(memberName, out var runtimeValue) && runtimeValue is not null)
+                {
+                    value = runtimeValue;
+                    RecordReference($"state.{memberName}");
                     return true;
                 }
 

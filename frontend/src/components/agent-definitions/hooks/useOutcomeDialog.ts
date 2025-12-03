@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
 import type {
@@ -6,12 +6,11 @@ import type {
   AgentStepDefinition,
   AgentStepOutcomeDefinition,
 } from "../../../types/agents";
-import type { OutcomeFormState, WorkflowEdge } from "../types";
-import {
-  createKeyValueEntry,
-  entriesFromRecord,
-  recordFromEntries,
-} from "../util";
+import type {
+  ExpressionValidationState,
+  OutcomeFormState,
+  WorkflowEdge,
+} from "../types";
 
 type ApplyDocumentUpdate = (
   updater: (draft: AgentDefinitionsDocument) => AgentDefinitionsDocument | void
@@ -21,6 +20,7 @@ interface UseOutcomeDialogOptions {
   draftDocument: AgentDefinitionsDocument | null;
   activeWorkflowId: string | null;
   applyDocumentUpdate: ApplyDocumentUpdate;
+  apiBaseUrl: string;
 }
 
 interface OutcomeDialogBindings {
@@ -33,20 +33,17 @@ interface OutcomeDialogBindings {
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onFieldChange: (
-    field: "name" | "nextStep" | "conditionType" | "order"
+    field: "name" | "nextStep" | "order"
   ) => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void;
   onEndWorkflowToggle: (event: ChangeEvent<HTMLInputElement>) => void;
-  onAddConditionParameter: () => void;
-  onRemoveConditionParameter: (entryId: string) => void;
-  onConditionParameterChange: (
-    entryId: string,
-    field: "key" | "value"
-  ) => (event: ChangeEvent<HTMLInputElement>) => void;
+  onExpressionChange: (value: string) => void;
   onDelete?: () => void;
+  expressionValidationState: ExpressionValidationState;
+  saveDisabled?: boolean;
 }
 
 interface UseOutcomeDialogResult {
-  dialogProps: OutcomeDialogBindings;
+  dialogProps: OutcomeDialogBindings & { apiBaseUrl: string };
   openForEdge: (edge: WorkflowEdge) => void;
   openForCreation: (
     sourceStep: string,
@@ -55,16 +52,29 @@ interface UseOutcomeDialogResult {
   reset: () => void;
 }
 
+type ExpressionValidationResponse = {
+  success: boolean;
+  error?: string | null;
+  errorCode?: string | null;
+  resultKind?: string | null;
+};
+
 export function useOutcomeDialog({
   draftDocument,
   activeWorkflowId,
   applyDocumentUpdate,
+  apiBaseUrl,
 }: UseOutcomeDialogOptions): UseOutcomeDialogResult {
   const [isOpen, setIsOpen] = useState(false);
   const [mode, setMode] = useState<"create" | "edit">("edit");
   const [dialogTarget, setDialogTarget] = useState<WorkflowEdge | null>(null);
   const [outcomeForm, setOutcomeForm] = useState<OutcomeFormState | null>(null);
   const [outcomeFormError, setOutcomeFormError] = useState<string | null>(null);
+  const [expressionValidationState, setExpressionValidationState] =
+    useState<ExpressionValidationState>({
+      status: "idle",
+    });
+  const validationRequestId = useRef(0);
 
   const availableSteps = useMemo(() => {
     if (!draftDocument || !activeWorkflowId) {
@@ -83,7 +93,84 @@ export function useOutcomeDialog({
     setDialogTarget(null);
     setOutcomeForm(null);
     setOutcomeFormError(null);
+    validationRequestId.current += 1;
+    setExpressionValidationState({ status: "idle" });
   }, []);
+
+  const validateExpression = useCallback(
+    async (expression: string): Promise<ExpressionValidationResponse> => {
+      const normalizedBase = apiBaseUrl.endsWith("/")
+        ? apiBaseUrl.slice(0, -1)
+        : apiBaseUrl;
+
+      try {
+        const response = await fetch(
+          `${normalizedBase}/api/workflows/expressions/validate`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ expression }),
+          }
+        );
+
+        if (!response.ok) {
+          return {
+            success: false,
+            error: "Unable to validate expression. Please try again.",
+            errorCode: "request_failed",
+          };
+        }
+
+        const payload = (await response.json()) as ExpressionValidationResponse;
+        return payload;
+      } catch (error) {
+        console.error("Expression validation failed", error);
+        return {
+          success: false,
+          error: "Unable to validate expression due to a network error.",
+          errorCode: "network_error",
+        };
+      }
+    },
+    [apiBaseUrl]
+  );
+
+  const scheduleExpressionValidation = useCallback(
+    (expression: string) => {
+      const trimmed = expression.trim();
+      const requestId = ++validationRequestId.current;
+
+      if (!trimmed) {
+        setExpressionValidationState({
+          status: "invalid",
+          message: "Provide a boolean expression.",
+        });
+        return;
+      }
+
+      setExpressionValidationState({ status: "pending" });
+
+      validateExpression(trimmed).then((result) => {
+        if (validationRequestId.current !== requestId) {
+          return;
+        }
+
+        if (result.success) {
+          setExpressionValidationState({ status: "valid" });
+          return;
+        }
+
+        setExpressionValidationState({
+          status: "invalid",
+          message:
+            result.error ?? "Expression must evaluate to a boolean value.",
+        });
+      });
+    },
+    [validateExpression]
+  );
 
   const buildOutcomeFormState = useCallback(
     (
@@ -101,8 +188,7 @@ export function useOutcomeDialog({
         name: outcome?.name ?? "",
         nextStep: outcome?.nextStep ?? "",
         endWorkflow: outcome?.endWorkflow ?? false,
-        conditionType: outcome?.condition?.type ?? "",
-        conditionParameters: entriesFromRecord(outcome?.condition?.parameters),
+        expression: outcome?.condition?.expression ?? "",
         order: resolvedOrder ? String(resolvedOrder) : "",
       };
     },
@@ -287,6 +373,23 @@ export function useOutcomeDialog({
     [draftDocument, activeWorkflowId, buildOutcomeFormState]
   );
 
+  useEffect(() => {
+    if (!isOpen || !outcomeForm) {
+      return;
+    }
+
+    if (expressionValidationState.status !== "idle") {
+      return;
+    }
+
+    scheduleExpressionValidation(outcomeForm.expression ?? "");
+  }, [
+    isOpen,
+    outcomeForm,
+    expressionValidationState.status,
+    scheduleExpressionValidation,
+  ]);
+
   const openForCreation = useCallback(
     (sourceStep: string, overrides?: Partial<OutcomeFormState>) => {
       setDialogTarget(null);
@@ -330,13 +433,13 @@ export function useOutcomeDialog({
       const mergedForm: OutcomeFormState = {
         ...baseForm,
         ...overrides,
-        conditionParameters:
-          overrides?.conditionParameters ?? baseForm.conditionParameters,
         order: overrides?.order ?? baseForm.order,
       };
 
       setMode("create");
       setOutcomeForm(mergedForm);
+      validationRequestId.current += 1;
+      setExpressionValidationState({ status: "idle" });
       setOutcomeFormError(null);
       setIsOpen(true);
     },
@@ -344,7 +447,7 @@ export function useOutcomeDialog({
   );
 
   const handleFieldChange = useCallback(
-    (field: "name" | "nextStep" | "conditionType" | "order") =>
+    (field: "name" | "nextStep" | "order") =>
       (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const value = event.target.value;
         setOutcomeForm((previous) =>
@@ -370,57 +473,18 @@ export function useOutcomeDialog({
     []
   );
 
-  const handleAddConditionParameter = useCallback(() => {
-    setOutcomeForm((previous) =>
-      previous
-        ? {
-            ...previous,
-            conditionParameters: [
-              ...previous.conditionParameters,
-              createKeyValueEntry(),
-            ],
-          }
-        : previous
-    );
-  }, []);
-
-  const handleRemoveConditionParameter = useCallback((entryId: string) => {
-    setOutcomeForm((previous) => {
-      if (!previous) {
-        return previous;
-      }
-
-      return {
-        ...previous,
-        conditionParameters: previous.conditionParameters.filter(
-          (entry) => entry.id !== entryId
-        ),
-      };
-    });
-  }, []);
-
-  const handleConditionParameterChange = useCallback(
-    (entryId: string, field: "key" | "value") =>
-      (event: ChangeEvent<HTMLInputElement>) => {
-        const value = event.target.value;
-        setOutcomeForm((previous) => {
-          if (!previous) {
-            return previous;
-          }
-
-          return {
-            ...previous,
-            conditionParameters: previous.conditionParameters.map((entry) =>
-              entry.id === entryId ? { ...entry, [field]: value } : entry
-            ),
-          };
-        });
-      },
-    []
+  const handleExpressionChange = useCallback(
+    (value: string) => {
+      setOutcomeForm((previous) =>
+        previous ? { ...previous, expression: value } : previous
+      );
+      scheduleExpressionValidation(value);
+    },
+    [scheduleExpressionValidation]
   );
 
   const handleSubmit = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
+    async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
 
       if (!outcomeForm || !draftDocument || !activeWorkflowId) {
@@ -442,11 +506,35 @@ export function useOutcomeDialog({
         return;
       }
 
+      if (!outcomeForm.expression.trim()) {
+        setOutcomeFormError("Provide a boolean expression for this outcome.");
+        return;
+      }
+
       const trimmedOrder = outcomeForm.order.trim();
       const parsedOrder = Number.parseInt(trimmedOrder, 10);
 
       if (!trimmedOrder || Number.isNaN(parsedOrder) || parsedOrder <= 0) {
         setOutcomeFormError("Outcome order must be a positive integer.");
+        return;
+      }
+
+      if (expressionValidationState.status !== "valid") {
+        setOutcomeFormError(
+          expressionValidationState.message ??
+            "Expression must evaluate to a boolean value."
+        );
+        return;
+      }
+
+      const validation = await validateExpression(
+        outcomeForm.expression.trim()
+      );
+
+      if (!validation.success) {
+        setOutcomeFormError(
+          validation.error ?? "Expression must evaluate to a boolean value."
+        );
         return;
       }
 
@@ -469,42 +557,21 @@ export function useOutcomeDialog({
 
         step.outcomes = step.outcomes ?? [];
 
-        const conditionParameters = recordFromEntries(
-          outcomeForm.conditionParameters
-        );
-        const hasConditionParameters =
-          Object.keys(conditionParameters).length > 0;
-        const condition =
-          outcomeForm.conditionType.trim() || hasConditionParameters
-            ? {
-                type: outcomeForm.conditionType.trim() || undefined,
-                parameters: hasConditionParameters
-                  ? conditionParameters
-                  : undefined,
-              }
-            : undefined;
-
         const updatedOutcome: AgentStepOutcomeDefinition = {
           name: trimmedName,
           nextStep: outcomeForm.endWorkflow
             ? undefined
             : outcomeForm.nextStep.trim() || undefined,
           endWorkflow: outcomeForm.endWorkflow || undefined,
-          condition,
+          condition: {
+            expression: outcomeForm.expression.trim(),
+          },
           order: parsedOrder,
         };
 
         if (!updatedOutcome.endWorkflow) {
           delete (updatedOutcome as Partial<AgentStepOutcomeDefinition>)
             .endWorkflow;
-        }
-
-        if (
-          updatedOutcome.condition &&
-          (!updatedOutcome.condition.parameters ||
-            Object.keys(updatedOutcome.condition.parameters).length === 0)
-        ) {
-          delete updatedOutcome.condition.parameters;
         }
 
         if (mode === "edit") {
@@ -546,6 +613,7 @@ export function useOutcomeDialog({
       reset,
       computeNormalizedOrder,
       ensureUniqueOutcomeOrders,
+      expressionValidationState,
     ]
   );
 
@@ -620,10 +688,12 @@ export function useOutcomeDialog({
       onSubmit: handleSubmit,
       onFieldChange: handleFieldChange,
       onEndWorkflowToggle: handleEndWorkflowToggle,
-      onAddConditionParameter: handleAddConditionParameter,
-      onRemoveConditionParameter: handleRemoveConditionParameter,
-      onConditionParameterChange: handleConditionParameterChange,
+      onExpressionChange: handleExpressionChange,
       onDelete: mode === "edit" ? handleDelete : undefined,
+      apiBaseUrl,
+      expressionValidationState,
+      saveDisabled:
+        !outcomeForm || expressionValidationState.status !== "valid",
     },
     openForEdge,
     openForCreation,

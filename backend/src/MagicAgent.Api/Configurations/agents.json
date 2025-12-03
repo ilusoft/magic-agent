@@ -16,8 +16,10 @@
           "name": "Security and Classification",
           "type": "chat",
           "parameters": {
-            "systemPrompt": "You are a prompt classifier for a ticket pricing system. \n\nYout first goal is to validate the prompt provided to ensure the request can be fulfilled solely with information coming from the available pricing tools (Production/Event search, Inventory Search, Pricing Group Search, Pricing group CRUD tools). You have to validate as well that the prompts are only related to professional subjects in the field of ticket brokering. No subjects like jokes, personal feelings, personal opinions, etc. are allowed. \n\nYour second goal is to qualify the intent of the prompt provided into 3 categories:\n\n1- Risk : Prompts that don\u0027t met the security rules explained above (reply with \u0022ROUTE: risk\u0022)\n2- Research : Prompts that require information about productions/events , inventory or pricing groups. ( reply with \u0022ROUTE: research\u0022)\n3- Ticket Group Creation : Prompts that require the creation of pricing groups as outcome of the user request. ( reply with \u0022ROUTE: create PG\u0022)\n4- Ticket Group Edition / Deletion : Prompts that require the update of existing pricing groups or the deletion of existing pricing groups ( reply with \u0022ROUTE: update PG\u0022).\n\nThe reply text is the only output of this step. No other action will be taken at this stage."
+            "systemPrompt": "You are a prompt classifier for a ticket pricing system. \n\nYout first goal is to validate the prompt provided to ensure the request can be fulfilled solely with information coming from the available pricing tools (Production/Event search, Inventory Search, Pricing Group Search, Pricing group CRUD tools). You have to validate as well that the prompts are only related to professional subjects in the field of ticket brokering. No subjects like jokes, personal feelings, personal opinions, etc. are allowed. \n\nYour second goal is to qualify the intent of the prompt provided into 3 categories:\n\n1- Risk : Prompts that don\u0027t met the security rules explained above (reply with \u0022{{var.evalToRisk}}\u0022)\n2- Research : Prompts that require information about productions/events , inventory or pricing groups. ( reply with \u0022{{var.evalToResearch}}\u0022)\n3- Ticket Group Creation : Prompts that require the creation of pricing groups as outcome of the user request. ( reply with \u0022{{var.evalToCreate}}\u0022)\n4- Ticket Group Edition / Deletion : Prompts that require the update of existing pricing groups or the deletion of existing pricing groups ( reply with \u0022{{var.evalToEdit}}\u0022).\n\nThe reply text is the only output of this step. No other action will be taken at this stage.",
+            "message": ""
           },
+          "variableTypes": {},
           "provider": "azure-openai",
           "options": {},
           "conversation": {
@@ -31,10 +33,7 @@
               "name": "research_handoff",
               "nextStep": "Research Agent",
               "condition": {
-                "type": "contains",
-                "parameters": {
-                  "value": "ROUTE: research"
-                }
+                "expression": "state.output == var.evalToResearch"
               },
               "endWorkflow": false,
               "order": 2
@@ -43,10 +42,7 @@
               "name": "risk_handoff",
               "nextStep": "Escalate Risk",
               "condition": {
-                "type": "contains",
-                "parameters": {
-                  "value": "ROUTE: risk"
-                }
+                "expression": "state.output == var.evalToRisk"
               },
               "endWorkflow": false,
               "order": 1
@@ -54,10 +50,7 @@
             {
               "name": "default",
               "nextStep": "Escalate Risk",
-              "condition": {
-                "type": "always",
-                "parameters": {}
-              },
+              "condition": null,
               "endWorkflow": false,
               "order": 5
             },
@@ -65,10 +58,7 @@
               "name": "creator_handoff",
               "nextStep": "Create Agent",
               "condition": {
-                "type": "contains",
-                "parameters": {
-                  "value": "ROUTE: create PG"
-                }
+                "expression": "state.output == var.evalToCreate"
               },
               "endWorkflow": false,
               "order": 3
@@ -77,16 +67,13 @@
               "name": "editor_handoff",
               "nextStep": "Edit Agent",
               "condition": {
-                "type": "contains",
-                "parameters": {
-                  "value": "ROUTE: update PG"
-                }
+                "expression": "state.output == var.evalToEdit"
               },
               "endWorkflow": false,
               "order": 4
             }
           ],
-          "isStartStep": false
+          "isStartStep": true
         },
         {
           "name": "Research Agent",
@@ -95,6 +82,7 @@
             "systemPrompt": "You are an inventory research assistant for ticket brokers. \n\nToday\u0027s date is: {{var.currentDate}} \n\nGoals:\n- Use the available tools to help users to get data to answer their question about productions, inventory and their pricing strategies. \n- Plan the execution of the tasks to minimize the calls to the tools and be as exact with the answer to the user as possible.\n- If the request requires too many tool requests. Stop and ask the user for narrowing the criteria to research data.\n\nOutput:\n- Return the results of your research in JSON format with an extra property called : \u0022notes\u0022 that will have the values \u0022has-data\u0022 if we found information as part of the research or \u0022no-data\u0022 if nothing useful was found as part of the research or \u0022error\u0022 if the tool request was not successful.",
             "message": ""
           },
+          "variableTypes": {},
           "provider": "azure-openai",
           "options": {},
           "conversation": {
@@ -112,10 +100,7 @@
               "name": "has_results",
               "nextStep": "Summarize Research Results",
               "condition": {
-                "type": "contains",
-                "parameters": {
-                  "value": "\u0022has-data\u0022"
-                }
+                "expression": "contains(state.output, \u0022\\\u0022has-data\\\u0022\u0022)"
               },
               "endWorkflow": false,
               "order": 1
@@ -123,10 +108,7 @@
             {
               "name": "no_results",
               "nextStep": "No results message",
-              "condition": {
-                "type": "always",
-                "parameters": {}
-              },
+              "condition": null,
               "endWorkflow": false,
               "order": 2
             }
@@ -140,6 +122,7 @@
             "systemPrompt": "You are a summarization assistant in a ticket broker management system.\n\nGoal and constraints:\n- Summarize the information found in the input data in simple language.\n- Use the context of the conversation to add helpful details to the user.\n- Add some helpful insights and guidance extracted from the information extracted up to this point.\n- Add some potential next steps they can take to continue working with the system (i.e. Create/update pricing groups, remove groups, research other productions and inventory.... ).\n- Keep the summarization and insights as brief as possible. Maximum 3 bullets per item.",
             "message": ""
           },
+          "variableTypes": {},
           "provider": "azure-openai",
           "options": {},
           "conversation": {
@@ -152,10 +135,7 @@
             {
               "name": "finish_research",
               "nextStep": null,
-              "condition": {
-                "type": "always",
-                "parameters": {}
-              },
+              "condition": null,
               "endWorkflow": true,
               "order": null
             }
@@ -168,6 +148,7 @@
           "parameters": {
             "message": "Your question cannot be answered with the available information."
           },
+          "variableTypes": {},
           "provider": "azure-openai",
           "options": {},
           "conversation": null,
@@ -178,10 +159,7 @@
             {
               "name": "risk_notified",
               "nextStep": null,
-              "condition": {
-                "type": "always",
-                "parameters": {}
-              },
+              "condition": null,
               "endWorkflow": true,
               "order": null
             }
@@ -195,12 +173,15 @@
             "systemPrompt": "You are a Pricing Group Creation agent for a ticket broker price management system. \n\nGoals and Constraints:\n- To create a pricing group you have a tool available that accepts variety of parameters to complete this task. \n- You should use the information on the context of this conversation and the user prompt to extract the minimal required information to create a pricing group. \n- You have other tools that you can use to find missing parameters to complete the create pricing group task.\n- By default the isAutopricingEnabled should be false (which means the pricing group is in \u0022simulation\u0022 mode). If the user request auto price mode we can enable this flag.\n- A pricing group needs as mandatory parameters the productionId (a.k.a masterProductionId), a pricing group name, an anchor ticket group (first ticket that will be priced using the cheapest marketplace comparable ticket found as base price point) and a anchor ticket offset amount (amount that we will apply to the price of the marketplace comparable cheapest ticket to price our anchor ticket). That amount can have a direction (increase or decrease) and a type (applied as value or as a percentage to the price of the cheapest comparable ticket).\n-  Other parameters that we can optionally be provided to the pricing group are:\n    * Additional Pricing groups (they will be priced incrementally based on the rank provided - anchor ticket is rank 0.\n    * Pricing Group Offset Amount - Direction - Type : These 3 parameters define how the other tickets in the group are incrementally prices (price increase/decrease by a value or percentage and the amount of that offset)\n    * Floor and Ceiling Values : Determine the maximum and minimum price that we will allow a ticket group to be priced (the constraint might be apply only to the Anchor ticket or to all the tickets in the pricing group based on the parameters ApplyCeilingOnlyToAnchor and ApplyFloorOnlyToAnchor)\n    * Sharing Tickets : This refer to the capability to broadcast tickets to a marketplace or not. We can control the share of the anchor individually with a flag and of the other tickets in the pricing group with different methods (share certain amount or percentage of tickets in the group). We have as well a flag to allow the control of sharing to happen through our pricing tool or not.\n- A ticket group can only belong to a single pricing group and can not be added to another pricing group if already assigned to a different group.",
             "message": ""
           },
+          "variableTypes": {},
           "provider": "azure-openai",
           "options": {},
           "conversation": {
             "enabled": true
           },
-          "tools": ["create-pricing-group-tools"],
+          "tools": [
+            "create-pricing-group-tools"
+          ],
           "stopOnToolError": false,
           "inputSource": "usePrevious",
           "outcomes": [
@@ -221,22 +202,22 @@
             "systemPrompt": "You are a Pricing Group Maintenance agent for a ticket broker price management system. \n\nGOALS AND CONSTRAINTS:\n- Your main tasks are to adjust the parameters of existing pricing groups or delete them if the user request it.\n- To complete these tasks you need some mandatory fields requested by the edit or delete pricing group tools. \n- You should use the information on the context of this conversation and the user prompt to extract the minimal required information to perform the task requested. \n- A pricing group is identified by a pricingGroupId.\n- Some of the important parameter that identify a pricing group are:\n    * Anchor ticket parameters (Amount, direction, type): Define how the first ticket of the group would be priced against the cheapest ticket in the marketplace (type: percentage or value, direction: increase or decrease)\n    * Group offset parameters (Amount, direction, type): Defines how each ticket in the group is priced based on the previous ranked ticket group (rank = 0). (type: percentage or value, direction: increase or decrease)\n    * Floor and Ceiling Values : Determine the maximum and minimum price that we will allow a ticket group to be priced (the constraint might be apply only to the Anchor ticket or to all the tickets in the pricing group based on the parameters ApplyCeilingOnlyToAnchor and ApplyFloorOnlyToAnchor)\n    * Sharing Tickets : This refer to the capability to broadcast tickets to a marketplace or not. We can control the share of the anchor individually with a flag and of the other tickets in the pricing group with different methods (share certain amount or percentage of tickets in the group). We have as well a flag to allow the control of sharing to happen through our pricing tool or not.\n     * isAutoPricingEnabled : This flag controls if the groups is in \u0022Simulation\u0022 mode (flag off) or if the groups is in \u0022Auto Price\u0022 mode (flag on).\n- When editing the ticket groups of a pricing groups you have to provide ALL the tickets that the group contains ordered in the rank desired for pricing (rank = 0 is the anchor ticket).\n- A ticket group can only belong to a single pricing group and can not be added to another pricing group if already assigned to a different group. To perform a re-assignment of a pricing group we need to remove the ticket from the previous group first and the add it to its new pricing group.",
             "message": ""
           },
+          "variableTypes": {},
           "provider": "azure-openai",
           "options": {},
           "conversation": {
             "enabled": true
           },
-          "tools": ["edit-pricing-tool"],
+          "tools": [
+            "edit-pricing-tool"
+          ],
           "stopOnToolError": false,
           "inputSource": "usePrevious",
           "outcomes": [
             {
               "name": "edition_complete",
               "nextStep": "Summarize Edition Task",
-              "condition": {
-                "type": "always",
-                "parameters": {}
-              },
+              "condition": null,
               "endWorkflow": false,
               "order": 1
             }
@@ -250,6 +231,7 @@
             "systemPrompt": "You are a summarization assistant in a ticket broker management system.\n\nGoal and constraints:\n- Summarize the update of pricing groups results in simple language.\n- Use the context of the conversation to add helpful details to the user.\n- Add some potential next steps they can take to continue working with the system (i.e. Modify groups further, create more groups, remove groups, research other productions and inventory.... ).",
             "message": ""
           },
+          "variableTypes": {},
           "provider": "azure-openai",
           "options": {},
           "conversation": null,
@@ -274,6 +256,7 @@
             "systemPrompt": "You are a summarization assistant in a ticket broker management system.\n\nGoal and constraints:\n- Summarize the creation of pricing group results in simple language.\n- Use the context of the conversation to add helpful details to the user.\n- Add some potential next steps they can take to continue working with the system (i.e. Modify the group created, create more groups, remove groups, research other productions and inventory.... ).",
             "message": ""
           },
+          "variableTypes": {},
           "provider": "azure-openai",
           "options": {},
           "conversation": {
@@ -299,6 +282,7 @@
           "parameters": {
             "message": "No results found for that request. Please provide more details or different criteria for any further research."
           },
+          "variableTypes": {},
           "provider": "azure-openai",
           "options": {},
           "conversation": null,
@@ -320,7 +304,17 @@
           "name": "Set Initial Variables",
           "type": "setVariables",
           "parameters": {
-            "currentDate": "$preset:CurrentDate"
+            "currentDate": "$preset:CurrentDate",
+            "evalToRisk": "RESULT: Risk",
+            "evalToResearch": "RESULT: Research",
+            "evalToCreate": "RESULT: Create",
+            "evalToEdit": "RESULT: Edit"
+          },
+          "variableTypes": {
+            "evalToRisk": "string",
+            "evalToResearch": "string",
+            "evalToCreate": "string",
+            "evalToEdit": "string"
           },
           "provider": "azure-openai",
           "options": {},
@@ -337,7 +331,7 @@
               "order": 1
             }
           ],
-          "isStartStep": true
+          "isStartStep": false
         }
       ],
       "tools": [
@@ -661,11 +655,11 @@
         },
         "viewport": {
           "position": {
-            "x": 398.32253700237663,
-            "y": 349.7961477232684,
+            "x": 374.65876102716425,
+            "y": 343.57410804277663,
             "handles": null
           },
-          "zoom": 0.9491817418946925
+          "zoom": 0.9867498191175762
         }
       },
       "streaming": {
@@ -686,6 +680,7 @@
           "name": "entryQuestion",
           "type": "chat",
           "parameters": {},
+          "variableTypes": {},
           "provider": "azure-openai",
           "options": {},
           "conversation": {

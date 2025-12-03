@@ -29,7 +29,6 @@
             {
               "name": "agent-response",
               "nextStep": "set-out-vars",
-              "condition": null,
               "endWorkflow": false,
               "order": 1
             }
@@ -56,7 +55,6 @@
             {
               "name": "go-to-chat",
               "nextStep": "general chat agent",
-              "condition": null,
               "endWorkflow": false,
               "order": 1
             }
@@ -67,7 +65,7 @@
           "name": "set-out-vars",
           "type": "setVariables",
           "parameters": {
-            "combinedOutput": "[{{var.currentDate}}] {{var.originalInput}} ==\u003E {{lastOutput}}"
+            "combinedOutput": "[{{var.currentDate}}] {{var.originalInput}} ==> {{lastOutput}}"
           },
           "variableTypes": {},
           "provider": "azure-openai",
@@ -80,7 +78,6 @@
             {
               "name": "to-echo",
               "nextStep": "output-echo",
-              "condition": null,
               "endWorkflow": false,
               "order": 1
             }
@@ -104,7 +101,6 @@
             {
               "name": "finish",
               "nextStep": null,
-              "condition": null,
               "endWorkflow": true,
               "order": 1
             }

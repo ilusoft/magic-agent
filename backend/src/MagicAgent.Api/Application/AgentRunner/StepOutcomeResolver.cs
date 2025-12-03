@@ -1,3 +1,8 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using MagicAgent.Api.Application.Expressions;
+
 namespace MagicAgent.Api.Application.AgentRunner;
 
 internal static class StepOutcomeResolver
@@ -6,12 +11,18 @@ internal static class StepOutcomeResolver
         AgentDefinition definition,
         IDictionary<string, AgentStepDefinition> stepLookup,
         AgentStepDefinition currentStep,
+        string? stepInput,
         string? output,
+        string? lastOutput,
+        IReadOnlyDictionary<string, WorkflowExpressionValue> variables,
+        IReadOnlyDictionary<string, WorkflowExpressionValue> parameters,
+        IWorkflowExpressionEvaluator expressionEvaluator,
         ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(stepLookup);
         ArgumentNullException.ThrowIfNull(currentStep);
+        ArgumentNullException.ThrowIfNull(expressionEvaluator);
         ArgumentNullException.ThrowIfNull(logger);
 
         var normalizedOutput = output ?? string.Empty;
@@ -37,31 +48,17 @@ internal static class StepOutcomeResolver
             .Select(wrapper => wrapper.Outcome)
             .ToList();
 
-        var defaultOutcome = orderedOutcomes.FirstOrDefault(IsDefaultOutcome);
+        var runtimeState = BuildRuntimeState(currentStep, normalizedOutput);
+        var expressionContext = new WorkflowExpressionContext(variables, parameters, runtimeState, stepInput, lastOutput);
 
-        var conditionalOutcomes = orderedOutcomes
-            .Where(outcome => !IsDefaultOutcome(outcome))
-            .ToList();
-
-        foreach (var outcome in conditionalOutcomes)
+        foreach (var outcome in orderedOutcomes)
         {
-            if (!EvaluateOutcomeCondition(definition, currentStep, outcome, normalizedOutput, logger))
+            if (!EvaluateOutcomeCondition(definition, currentStep, outcome, expressionContext, expressionEvaluator, logger))
             {
                 continue;
             }
 
             return ResolveOutcome(definition, stepLookup, currentStep, outcome, logger);
-        }
-
-        if (defaultOutcome is not null)
-        {
-            logger.LogInformation(
-                "No conditional outcomes matched for agent {AgentId} step {StepName}. Applying default outcome '{OutcomeName}'.",
-                definition.Id,
-                currentStep.Name,
-                defaultOutcome.Name);
-
-            return ResolveOutcome(definition, stepLookup, currentStep, defaultOutcome, logger);
         }
 
         logger.LogWarning(
@@ -135,110 +132,47 @@ internal static class StepOutcomeResolver
         AgentDefinition definition,
         AgentStepDefinition step,
         AgentStepOutcomeDefinition outcome,
-        string output,
+        WorkflowExpressionContext context,
+        IWorkflowExpressionEvaluator evaluator,
         ILogger logger)
     {
         var condition = outcome.Condition;
+        var expression = condition?.Expression;
 
-        if (condition is null)
+        if (string.IsNullOrWhiteSpace(expression))
         {
             return true;
         }
 
-        var conditionType = string.IsNullOrWhiteSpace(condition.Type) ? "always" : condition.Type.Trim();
-        var parameters = condition.Parameters ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var comparison = GetStringComparison(parameters);
+        var result = evaluator.Evaluate(expression, context);
 
-        switch (conditionType.ToLowerInvariant())
+        if (!result.Success)
         {
-            case "always":
-                return true;
-            case "contains":
-                if (!parameters.TryGetValue("value", out var containsValue))
-                {
-                    logger.LogWarning(
-                        "Outcome '{OutcomeName}' for agent {AgentId} step {StepName} missing 'value' parameter for 'contains' condition.",
-                        outcome.Name,
-                        definition.Id,
-                        step.Name);
-                    return false;
-                }
-
-                return output.IndexOf(containsValue, comparison) >= 0;
-            case "equals":
-                if (!parameters.TryGetValue("value", out var equalsValue))
-                {
-                    logger.LogWarning(
-                        "Outcome '{OutcomeName}' for agent {AgentId} step {StepName} missing 'value' parameter for 'equals' condition.",
-                        outcome.Name,
-                        definition.Id,
-                        step.Name);
-                    return false;
-                }
-
-                return string.Equals(output, equalsValue, comparison);
-            case "startswith":
-                if (!parameters.TryGetValue("value", out var startsWithValue))
-                {
-                    logger.LogWarning(
-                        "Outcome '{OutcomeName}' for agent {AgentId} step {StepName} missing 'value' parameter for 'startsWith' condition.",
-                        outcome.Name,
-                        definition.Id,
-                        step.Name);
-                    return false;
-                }
-
-                return output.StartsWith(startsWithValue, comparison);
-            case "endswith":
-                if (!parameters.TryGetValue("value", out var endsWithValue))
-                {
-                    logger.LogWarning(
-                        "Outcome '{OutcomeName}' for agent {AgentId} step {StepName} missing 'value' parameter for 'endsWith' condition.",
-                        outcome.Name,
-                        definition.Id,
-                        step.Name);
-                    return false;
-                }
-
-                return output.EndsWith(endsWithValue, comparison);
-            case "notempty":
-                return !string.IsNullOrWhiteSpace(output);
-            case "empty":
-                return string.IsNullOrWhiteSpace(output);
-            default:
-                logger.LogWarning(
-                    "Outcome '{OutcomeName}' for agent {AgentId} step {StepName} has unsupported condition type '{ConditionType}'.",
-                    outcome.Name,
-                    definition.Id,
-                    step.Name,
-                    condition.Type);
-                return false;
-        }
-    }
-
-    private static StringComparison GetStringComparison(IDictionary<string, string> parameters)
-    {
-        if (parameters.TryGetValue("caseSensitive", out var caseSensitiveValue) &&
-            bool.TryParse(caseSensitiveValue, out var caseSensitive) &&
-            caseSensitive)
-        {
-            return StringComparison.Ordinal;
-        }
-
-        return StringComparison.OrdinalIgnoreCase;
-    }
-
-    private static bool IsDefaultOutcome(AgentStepOutcomeDefinition? outcome)
-    {
-        if (outcome is null)
-        {
+            logger.LogWarning(
+                "Outcome '{OutcomeName}' for agent {AgentId} step {StepName} failed to evaluate expression '{Expression}': {Error}.",
+                outcome.Name,
+                definition.Id,
+                step.Name,
+                expression,
+                result.ErrorMessage ?? "unknown error");
             return false;
         }
 
-        var conditionType = outcome.Condition?.Type;
+        var boolean = CoerceBoolean(result.Value);
 
-        return !string.IsNullOrWhiteSpace(conditionType) &&
-            string.Equals(conditionType.Trim(), "always", StringComparison.OrdinalIgnoreCase);
+        if (result.Value.Kind != WorkflowExpressionValueKind.Boolean)
+        {
+            logger.LogDebug(
+                "Outcome '{OutcomeName}' for agent {AgentId} step {StepName} expression '{Expression}' returned {Kind}; interpreted as {Boolean}.",
+                outcome.Name,
+                definition.Id,
+                step.Name,
+                expression,
+                result.Value.Kind,
+                boolean);
+        }
+
+        return boolean;
     }
 
     private static string? GetSequentialNextStep(AgentDefinition definition, AgentStepDefinition currentStep)
@@ -265,6 +199,32 @@ internal static class StepOutcomeResolver
         }
 
         return null;
+    }
+
+    private static IReadOnlyDictionary<string, WorkflowExpressionValue> BuildRuntimeState(
+        AgentStepDefinition step,
+        string output)
+    {
+        var state = new Dictionary<string, WorkflowExpressionValue>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["output"] = WorkflowExpressionValue.FromString(output),
+            ["stepName"] = WorkflowExpressionValue.FromString(step.Name),
+            ["stepType"] = WorkflowExpressionValue.FromString(step.Type ?? string.Empty),
+        };
+
+        return state;
+    }
+
+    private static bool CoerceBoolean(WorkflowExpressionValue value)
+    {
+        return value.Kind switch
+        {
+            WorkflowExpressionValueKind.Boolean => value.BooleanValue ?? false,
+            WorkflowExpressionValueKind.Number => Math.Abs(value.NumberValue ?? 0d) > double.Epsilon,
+            WorkflowExpressionValueKind.String => !string.IsNullOrWhiteSpace(value.StringValue),
+            WorkflowExpressionValueKind.Json => value.JsonValue is not null,
+            _ => false,
+        };
     }
 
     internal readonly record struct StepOutcomeResolution(string? Outcome, string? NextStep, bool EndWorkflow);

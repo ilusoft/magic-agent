@@ -51,6 +51,7 @@ export function useWorkflowDialogs({
     draftDocument,
     activeWorkflowId,
     applyDocumentUpdate,
+    apiBaseUrl,
   });
 
   return {

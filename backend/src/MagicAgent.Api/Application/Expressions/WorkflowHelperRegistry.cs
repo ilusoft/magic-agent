@@ -172,6 +172,9 @@ public sealed class WorkflowHelperRegistry : IWorkflowHelperRegistry
                     _ => null,
                 }),
                 WorkflowExpressionValueKind.Null => WorkflowExpressionValue.Null(),
+                WorkflowExpressionValueKind.DateTime => result is DateTimeOffset dto
+                    ? WorkflowExpressionValue.FromDateTime(dto)
+                    : WorkflowExpressionValue.FromDateTime(Convert.ToDateTime(result, CultureInfo.InvariantCulture)),
                 _ => WorkflowExpressionValue.FromString(result?.ToString()),
             };
         }
@@ -222,6 +225,11 @@ public sealed class WorkflowHelperRegistry : IWorkflowHelperRegistry
                     WorkflowExpressionValueKind.String => bool.TryParse(provided.StringValue, out var parsed) && parsed,
                     _ => false,
                 };
+            }
+
+            if (expectedType == typeof(WorkflowExpressionValue))
+            {
+                return provided;
             }
 
             if (expectedType == typeof(JsonNode))

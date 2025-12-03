@@ -22,6 +22,9 @@ public enum WorkflowVariableDataType
 
     [EnumMember(Value = "json")]
     Json,
+
+    [EnumMember(Value = "boolean")]
+    Boolean,
 }
 
 public sealed class AgentDefinitionsDocument
@@ -209,11 +212,8 @@ public sealed class AgentStepOutcomeDefinition
 
 public sealed class AgentStepOutcomeConditionDefinition
 {
-    [JsonPropertyName("type")]
-    public string Type { get; init; } = "always";
-
-    [JsonPropertyName("parameters")]
-    public IDictionary<string, string> Parameters { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    [JsonPropertyName("expression")]
+    public string? Expression { get; init; }
 }
 
 public sealed class AgentToolDefinition

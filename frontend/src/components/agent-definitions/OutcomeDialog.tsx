@@ -1,7 +1,8 @@
 import type { ChangeEventHandler, FormEventHandler } from "react";
 
 import { DialogShell } from "./DialogShell";
-import type { OutcomeFormState } from "./types";
+import { ExpressionBuilderButton } from "../agent-definitions/expression-builder/ExpressionBuilderDialog";
+import type { ExpressionValidationState, OutcomeFormState } from "./types";
 
 interface OutcomeDialogProps {
   open: boolean;
@@ -13,16 +14,14 @@ interface OutcomeDialogProps {
   onClose: () => void;
   onSubmit: FormEventHandler<HTMLFormElement>;
   onFieldChange: (
-    field: "name" | "nextStep" | "conditionType" | "order"
+    field: "name" | "nextStep" | "order"
   ) => ChangeEventHandler<HTMLInputElement | HTMLSelectElement>;
   onEndWorkflowToggle: ChangeEventHandler<HTMLInputElement>;
-  onAddConditionParameter: () => void;
-  onRemoveConditionParameter: (entryId: string) => void;
-  onConditionParameterChange: (
-    entryId: string,
-    field: "key" | "value"
-  ) => ChangeEventHandler<HTMLInputElement>;
+  onExpressionChange: (value: string) => void;
   onDelete?: () => void;
+  apiBaseUrl: string;
+  expressionValidationState: ExpressionValidationState;
+  saveDisabled?: boolean;
 }
 
 export function OutcomeDialog({
@@ -36,10 +35,11 @@ export function OutcomeDialog({
   onSubmit,
   onFieldChange,
   onEndWorkflowToggle,
-  onAddConditionParameter,
-  onRemoveConditionParameter,
-  onConditionParameterChange,
+  onExpressionChange,
   onDelete,
+  apiBaseUrl,
+  expressionValidationState,
+  saveDisabled = false,
 }: OutcomeDialogProps) {
   return (
     <DialogShell
@@ -112,80 +112,46 @@ export function OutcomeDialog({
             End workflow when this outcome occurs
           </label>
 
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold uppercase text-foreground/60">
-                Condition
+                Expression
               </span>
-              <button
-                type="button"
-                className="rounded-md border border-border px-2 py-1 text-xs text-foreground/70 hover:bg-muted"
-                onClick={onAddConditionParameter}
-              >
-                Add parameter
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold uppercase text-foreground/60">
-                  Condition Type
-                </label>
-                <select
-                  value={outcomeForm.conditionType}
-                  onChange={onFieldChange("conditionType")}
-                  className="rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="">Default (always)</option>
-                  <option value="always">Always (no condition)</option>
-                  <option value="contains">Contains</option>
-                  <option value="equals">Equals</option>
-                  <option value="startswith">Starts with</option>
-                  <option value="endswith">Ends with</option>
-                  <option value="notempty">Not empty</option>
-                  <option value="empty">Empty</option>
-                </select>
-              </div>
-
-              {outcomeForm.conditionParameters.length === 0 ? (
-                <p className="text-xs text-foreground/60">
-                  No condition parameters defined. Add one to provide additional
-                  context for the condition.
-                </p>
-              ) : null}
-
-              {outcomeForm.conditionParameters.map((entry) => (
-                <div
-                  key={entry.id}
-                  className="grid grid-cols-[1fr_auto_1fr_auto] items-center gap-2"
-                >
-                  <input
-                    type="text"
-                    value={entry.key}
-                    onChange={onConditionParameterChange(entry.id, "key")}
-                    className="rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                    placeholder="Parameter key"
-                  />
-                  <span className="text-xs uppercase text-foreground/50">
-                    →
-                  </span>
-                  <input
-                    type="text"
-                    value={entry.value}
-                    onChange={onConditionParameterChange(entry.id, "value")}
-                    className="rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                    placeholder="Parameter value"
-                  />
+              <ExpressionBuilderButton
+                value={outcomeForm.expression}
+                onApply={onExpressionChange}
+                apiBaseUrl={apiBaseUrl}
+                mode="direct"
+                renderTrigger={({ open }) => (
                   <button
                     type="button"
-                    className="rounded-md border border-border px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
-                    onClick={() => onRemoveConditionParameter(entry.id)}
+                    className="rounded-md border border-border px-2 py-1 text-xs text-foreground/70 hover:bg-muted"
+                    onClick={open}
                   >
-                    Remove
+                    Open builder
                   </button>
-                </div>
-              ))}
+                )}
+              />
             </div>
+            <textarea
+              value={outcomeForm.expression}
+              onChange={(event) => onExpressionChange(event.target.value)}
+              className="h-24 w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              placeholder={`Example: contains(state.output, "ROUTE: research")`}
+            />
+            <p className="text-xs text-foreground/60">
+              Expressions must evaluate to a boolean. Helper functions and
+              workflow data are available inside the builder.
+            </p>
+            {expressionValidationState.status === "pending" ? (
+              <p className="text-xs text-foreground/60">Validating…</p>
+            ) : null}
+            {expressionValidationState.status === "invalid" &&
+            expressionValidationState.message ? (
+              <p className="text-xs text-destructive">
+                {expressionValidationState.message}
+              </p>
+            ) : null}
           </div>
 
           {outcomeFormError ? (
@@ -211,7 +177,8 @@ export function OutcomeDialog({
             ) : null}
             <button
               type="submit"
-              className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
+              className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-60"
+              disabled={saveDisabled}
             >
               {mode === "create" ? "Create Outcome" : "Save Changes"}
             </button>

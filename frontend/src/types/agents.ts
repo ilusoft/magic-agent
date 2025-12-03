@@ -2,7 +2,8 @@ export type WorkflowVariableDataType =
   | "string"
   | "number"
   | "dateTime"
-  | "json";
+  | "json"
+  | "boolean";
 
 export interface AgentDefinitionsDocument {
   agents: AgentDefinition[];
@@ -80,8 +81,7 @@ export interface AgentStepOutcomeDefinition {
 }
 
 export interface AgentStepOutcomeConditionDefinition {
-  type?: string;
-  parameters?: Record<string, string>;
+  expression?: string;
 }
 
 export interface AgentToolDefinition {

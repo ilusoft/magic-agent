@@ -62,6 +62,7 @@ export interface ExpressionBuilderButtonProps {
   onApply: (value: string) => void;
   apiBaseUrl: string;
   renderTrigger?: (controls: { open: () => void }) => ReactNode;
+  mode?: "embedded" | "direct";
 }
 
 export function ExpressionBuilderButton({
@@ -69,6 +70,7 @@ export function ExpressionBuilderButton({
   onApply,
   apiBaseUrl,
   renderTrigger,
+  mode = "embedded",
 }: ExpressionBuilderButtonProps) {
   const [open, setOpen] = useState(false);
   const [expression, setExpression] = useState(value ?? "");
@@ -77,6 +79,7 @@ export function ExpressionBuilderButton({
   const [loadingHelpers, setLoadingHelpers] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const pendingCaretRef = useRef<number | null>(null);
+  const isDirectExpression = mode === "direct";
 
   useEffect(() => {
     if (open) {
@@ -293,13 +296,41 @@ export function ExpressionBuilderButton({
         >
           <div className="flex flex-col gap-2 text-sm">
             <p className="text-xs text-foreground/60">
-              {"Write expressions using "}
-              <code className="rounded bg-muted px-1 text-[11px]">
-                {"${{ … }}"}
-              </code>
-              {
-                " syntax. Insert helper functions or reference workflow data using the tips below."
-              }
+              {isDirectExpression ? (
+                <>
+                  {
+                    "This field expects a raw expression that evaluates to a boolean. Enter the expression directly without wrapping it in "
+                  }
+                  <code className="rounded bg-muted px-1 text-[11px]">
+                    {"${{ … }}"}
+                  </code>
+                  {
+                    ". You can combine comparisons (==, !=, >, >=, <, <=) with logical operators such as "
+                  }
+                  <code className="rounded bg-muted px-1 text-[11px]">&&</code>
+                  {" and "}
+                  <code className="rounded bg-muted px-1 text-[11px]">||</code>
+                  {". For dates, helpers like "}
+                  <code className="rounded bg-muted px-1 text-[11px]">
+                    stringToDate()
+                  </code>
+                  {" or "}
+                  <code className="rounded bg-muted px-1 text-[11px]">
+                    dateDiff()
+                  </code>
+                  {" let you build boolean comparisons."}
+                </>
+              ) : (
+                <>
+                  {"Write expressions using "}
+                  <code className="rounded bg-muted px-1 text-[11px]">
+                    {"${{ … }}"}
+                  </code>
+                  {
+                    " syntax. Insert helper functions or reference workflow data using the tips below."
+                  }
+                </>
+              )}
             </p>
 
             <div className="space-y-2">
@@ -393,22 +424,24 @@ export function ExpressionBuilderButton({
               </div>
 
               <div className="flex h-full flex-col space-y-2">
-                <div className="flex flex-nowrap items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    className="rounded-md border border-border px-3 py-1 text-[11px] font-semibold text-primary hover:bg-primary/10"
-                    onClick={handleWrapSelection}
-                  >
-                    Wrap selection with {"${{ … }}"}
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-md border border-border px-3 py-1 text-[11px] font-semibold text-foreground/80 hover:bg-muted"
-                    onClick={handleUnwrapSelection}
-                  >
-                    Unwrap selection
-                  </button>
-                </div>
+                {!isDirectExpression ? (
+                  <div className="flex flex-nowrap items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      className="rounded-md border border-border px-3 py-1 text-[11px] font-semibold text-primary hover:bg-primary/10"
+                      onClick={handleWrapSelection}
+                    >
+                      Wrap selection with {"${{ … }}"}
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-md border border-border px-3 py-1 text-[11px] font-semibold text-foreground/80 hover:bg-muted"
+                      onClick={handleUnwrapSelection}
+                    >
+                      Unwrap selection
+                    </button>
+                  </div>
+                ) : null}
                 <div className="flex-1 rounded-md border border-dashed border-border/70 bg-muted/40 p-3 text-xs text-foreground/70">
                   <p className="font-semibold text-foreground/80">Tips</p>
                   <ul className="mt-2 list-disc space-y-1 pl-4">
@@ -436,10 +469,33 @@ export function ExpressionBuilderButton({
                       </code>
                       {" are always available."}
                     </li>
-                    <li>
-                      Use the wrap / unwrap controls alongside the helper list
-                      to quickly add or remove the expression envelope.
-                    </li>
+                    {isDirectExpression ? (
+                      <li>
+                        {"Combine comparisons (e.g. "}
+                        <code className="rounded bg-muted px-1 text-[11px]">
+                          var.score &gt; 10
+                        </code>
+                        {", "}
+                        <code className="rounded bg-muted px-1 text-[11px]">
+                          var.date &gt; stringToDate('2025-01-02')
+                        </code>
+                        {") with logical operators such as "}
+                        <code className="rounded bg-muted px-1 text-[11px]">
+                          &&
+                        </code>
+                        {" or "}
+                        <code className="rounded bg-muted px-1 text-[11px]">
+                          ||
+                        </code>
+                        {" to build boolean expressions."}
+                      </li>
+                    ) : null}
+                    {!isDirectExpression ? (
+                      <li>
+                        Use the wrap / unwrap controls alongside the helper list
+                        to quickly add or remove the expression envelope.
+                      </li>
+                    ) : null}
                   </ul>
                 </div>
               </div>

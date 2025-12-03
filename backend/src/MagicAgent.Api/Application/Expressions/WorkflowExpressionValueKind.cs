@@ -10,4 +10,5 @@ public enum WorkflowExpressionValueKind
     Boolean = 2,
     Json = 3,
     Null = 4,
+    DateTime = 5,
 }

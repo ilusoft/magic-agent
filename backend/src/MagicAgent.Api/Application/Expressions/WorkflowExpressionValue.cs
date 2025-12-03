@@ -1,3 +1,4 @@
+using System;
 using System.Globalization;
 using System.Text.Json.Nodes;
 
@@ -13,13 +14,15 @@ public sealed class WorkflowExpressionValue
         string? stringValue = null,
         double? numberValue = null,
         bool? booleanValue = null,
-        JsonNode? jsonValue = null)
+        JsonNode? jsonValue = null,
+        DateTimeOffset? dateTimeValue = null)
     {
         Kind = kind;
         StringValue = stringValue;
         NumberValue = numberValue;
         BooleanValue = booleanValue;
         JsonValue = jsonValue;
+        DateTimeValue = dateTimeValue;
     }
 
     public WorkflowExpressionValueKind Kind { get; }
@@ -31,6 +34,8 @@ public sealed class WorkflowExpressionValue
     public bool? BooleanValue { get; }
 
     public JsonNode? JsonValue { get; }
+
+    public DateTimeOffset? DateTimeValue { get; }
 
     public static WorkflowExpressionValue FromString(string? value) =>
         new(WorkflowExpressionValueKind.String, stringValue: value ?? string.Empty);
@@ -47,6 +52,9 @@ public sealed class WorkflowExpressionValue
     public static WorkflowExpressionValue Null() =>
         new(WorkflowExpressionValueKind.Null);
 
+    public static WorkflowExpressionValue FromDateTime(DateTimeOffset value) =>
+        new(WorkflowExpressionValueKind.DateTime, dateTimeValue: value);
+
     /// <summary>
     /// Returns a culture-aware string representation suitable for placeholder substitution.
     /// </summary>
@@ -60,6 +68,7 @@ public sealed class WorkflowExpressionValue
             WorkflowExpressionValueKind.Number => (NumberValue ?? 0).ToString(formatProvider),
             WorkflowExpressionValueKind.Boolean => (BooleanValue ?? false).ToString(formatProvider),
             WorkflowExpressionValueKind.Json => JsonValue?.ToJsonString() ?? string.Empty,
+            WorkflowExpressionValueKind.DateTime => (DateTimeValue ?? DateTimeOffset.MinValue).ToString("O", formatProvider),
             _ => string.Empty,
         };
     }

@@ -249,7 +249,12 @@ internal static partial class WorkflowPlaceholderResolver
             kvp => WorkflowExpressionValue.FromString(kvp.Value),
             Comparer) ?? new Dictionary<string, WorkflowExpressionValue>(Comparer);
 
-        return new WorkflowExpressionContext(variableValues, parameterValues, stepInput, lastStepOutput);
+        return new WorkflowExpressionContext(
+            variableValues,
+            parameterValues,
+            runtimeState: new Dictionary<string, WorkflowExpressionValue>(Comparer),
+            stepInput,
+            lastStepOutput);
     }
 
     private static bool TryResolveWorkflowParameter(

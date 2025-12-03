@@ -98,6 +98,42 @@ public static class DateWorkflowHelpers
         return parsed.ToString(template, CultureInfo.InvariantCulture);
     }
 
+    [WorkflowHelper("stringToDate", ReturnType = WorkflowExpressionValueKind.DateTime, Description = "Parses a date string (optionally using format/culture) and returns a DateTime value.")]
+    [WorkflowHelperParameter("value", Description = "Date/time string to parse.")]
+    [WorkflowHelperParameter("format", Description = "Optional .NET format string to use when parsing.", IsOptional = true)]
+    [WorkflowHelperParameter("culture", Description = "Optional culture name (e.g. en-US).", IsOptional = true)]
+    public static DateTimeOffset StringToDate(string value, string? format = null, string? culture = null)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException("Parameter 'value' must contain a date/time string.", nameof(value));
+        }
+
+        var cultureInfo = ResolveCulture(culture);
+
+        if (!string.IsNullOrWhiteSpace(format))
+        {
+            if (DateTimeOffset.TryParseExact(value, format, cultureInfo, DateTimeStyles.RoundtripKind, out var formatted))
+            {
+                return formatted;
+            }
+
+            throw new ArgumentException("Value does not match the provided format.", nameof(value));
+        }
+
+        if (DateTimeOffset.TryParse(value, cultureInfo, DateTimeStyles.RoundtripKind, out var parsed))
+        {
+            return parsed;
+        }
+
+        if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out parsed))
+        {
+            return parsed;
+        }
+
+        throw new ArgumentException("Value is not a valid date/time string.", nameof(value));
+    }
+
     [WorkflowHelper("datePart", ReturnType = WorkflowExpressionValueKind.Number, Description = "Extracts a numeric component from a date.")]
     [WorkflowHelperParameter("date", Description = "Input date/time.")]
     [WorkflowHelperParameter("part", Description = "Part to extract (year, month, day, hour, minute).")]
