@@ -37,6 +37,18 @@ A modular web application for designing, testing, and running AI agent workflows
 4. **Configuration Store** – Version-controlled JSON files describing agents, workflows, tool chains, environment variables, and runtime policies.
 5. **LLM/Tool Providers** – Pluggable connectors to LLMs and external capabilities.
 
+### Architectural patterns & layering
+
+The solution follows a clean, vertical-slice friendly structure:
+
+- **Presentation (MagicAgent.Api/Controllers)** – ASP.NET Core minimal controllers surface CRUD + run endpoints and stay logic-free. They call into the Application layer via injected interfaces, which makes the API host replaceable.
+- **Application layer (`Application/*`)** – Coordinates use-cases (agent CRUD, run orchestration, workflow expression evaluation). It depends only on domain abstractions (`IAgentRunner`, `IAgentDefinitionsProvider`, `IWorkflowExpressionEvaluator`) so tests can stub infrastructure easily.
+- **Expression subsystem (`Application/Expressions`)** – Tokenizer, Pratt parser, evaluator, and helper registry live behind `IWorkflowExpressionEvaluator`. The resolver keeps both unresolved placeholders and evaluated results for downstream debug tooling.
+- **Infrastructure (`Infrastructure/*`)** – File-backed providers, MCP client adapters, diagnostics stores, and streaming progress sinks. These types satisfy application interfaces and can be swapped for cloud versions later.
+- **Runtime services (`Application/AgentRunner`, `Infrastructure/AgentRunner`)** – Encapsulate the .NET Agent Framework orchestration, maintain conversation history, and publish progress via `IAgentRunProgressSink` so the UI can display step-by-step telemetry.
+
+Each layer only references the one below it (Presentation → Application → Infrastructure), while cross-cutting services (logging, validation, expression helpers) are registered centrally in `Program.cs`. Dependency injection keeps the seams explicit, making it straightforward to plug in mocks or alternate transports.
+
 ## Technology Stack
 
 | Layer            | Technology Choices                                                         |
@@ -80,23 +92,23 @@ magic-agent/
     └── architecture/                   # Extended design notes, diagrams
 ```
 
-## Workflow Expression Language (roadmap)
+## Workflow Expression Language
 
-We are extending the existing `{{placeholder}}` resolution into a full expression language so workflow authors can compose parameter and variable values without bespoke step code. This section captures the initial contract that will guide implementation and documentation.
+The workflow engine now ships with a full expression subsystem that supersedes simple `{{placeholder}}` replacements. Authors can compose math, invoke helpers, traverse JSON, and inspect prior step output without custom code.
 
 ### Goals
 
-1. Preserve backwards-compatible simple substitutions (string-only expressions continue to work).
-2. Add math/logic so numeric variables can be computed inline.
+1. Fully compatible with simple substitutions (`{{placeholder}}` or `${{expression}}`).
+2. Provide math/logic so numeric variables can be computed inline.
 3. Allow JSON/object graph traversal when variables or parameters contain structured data.
-4. Support helper functions that encapsulate reusable transformations, discoverable through backend metadata.
+4. Surface reusable helper functions that can be discovered via metadata (`GET /api/workflows/helpers`).
 
 ### Expression envelope
 
-- Simple substitutions keep `{{ expr }}`.
+- Simple substitutions keep `{{ expr }}` for backwards compatibility.
 - Expression-enabled placeholders use `${{ expr }}` to avoid ambiguity with legacy replacements.
 - Multiple expressions within one string are allowed; non-expression text is preserved verbatim.
-- Expressions evaluate to a string for substitution but can operate internally on numbers, booleans, or JSON values.
+- Expressions evaluate to a string for substitution but operate internally on numbers, booleans, JSON values, or `DateTime` instances.
 
 ### Literals & types
 
@@ -132,29 +144,18 @@ Division is floating point; integer division is not special-cased.
 
 ### Helper functions
 
-- Helpers live in static classes; each method is decorated with a `[WorkflowHelper("abs", ReturnType.Number, Description = "Absolute value")]` attribute (final naming TBD).
-- Evaluator resolves helper names case-insensitively and performs type coercion for supported primitives/JsonElement.
-- Initial helper catalog: `abs`, `sqr`, `sqrt`, `pow`, `min`, `max`, `substring(value, start, length?)`, `length`, `upper`, `lower`, `coalesce`, `json(value)`.
+- Helpers live in static classes decorated with `[WorkflowHelper]` + `[WorkflowHelperParameter]` so the registry can publish metadata.
+- Names are case-insensitive and inputs are auto-coerced (numbers, booleans, strings, JSON, or `WorkflowExpressionValue`).
+- The `/api/workflows/helpers` endpoint returns the catalog consumed by the frontend helper picker.
 
-### Helper metadata endpoint
+#### Helper catalog (current)
 
-- Backend scans helper classes on startup and exposes `GET /api/workflows/helpers`.
-- Response shape:
-
-  ```jsonc
-  [
-    {
-      "name": "abs",
-      "description": "Returns the absolute value of a number.",
-      "returnType": "number",
-      "parameters": [
-        { "name": "value", "type": "number", "description": "Input operand." }
-      ]
-    }
-  ]
-  ```
-
-- UI consumes this endpoint to populate helper pickers and inline documentation.
+| Category    | Helper                                                                                                                                                                                                                           | Summary                                |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| Math        | `abs`, `sqr`, `sqrt`, `pow(base, exponent)`, `min`, `max`                                                                                                                                                                        | Core numeric ops.                      |
+| Strings     | `length`, `toUpper`, `toLower`, `substring(value,start,length?)`, `replace`, `indexOf`, `trim`, `split(separator?)`, `contains`, `startsWith`, `endsWith`, `compare(caseSensitive?, trimWhitespace?)`, `isNullOrEmpty`, `isNull` | Text utilities and comparisons.        |
+| Arrays/JSON | `addToArray`, `removeFromArray(removeAll?)`, `indexOnArray(startFromEnd?)`, `replaceElement(replaceAll?)`, `subArray(invert?)`, `concatArrays`, `stringToJson`, `jsonToString`, `arrayLength`                                    | JSON array builders/manipulators.      |
+| Dates       | `dateAdd`, `dateDiff`, `dayOfWeek(culture?)`, `toLocalDate`, `toDateUtc(offsetMinutes?)`, `localOffset`, `dateConvert(format?)`, `stringToDate(format?, culture?)`, `datePart(part)`                                             | ISO-friendly date math and formatting. |
 
 ### Evaluation semantics
 
@@ -163,25 +164,26 @@ Division is floating point; integer division is not special-cased.
 - When an expression evaluates to JSON and the surrounding context expects a scalar, serialize using compact JSON.
 - Errors do not crash the workflow; we fall back to the original `{{expr}}` literal and record the error in `WorkflowParameterDebugInfo`.
 - Variable assignments keep both the rendered string and parsed `JsonElement` (when type = JSON) so downstream steps can access structured data.
+- Each step surfaces **parameter debug info**: both the unresolved placeholder string and the resolved values/placeholder list travel through the pipeline so the frontend can show what was substituted. This is especially helpful when debugging typed variables.
 
-### Open items / validation rules
+### Engine architecture
 
-- Decide whether implicit conversions (string → number) are automatic or opt-in.
-- Determine escaping rules for `}}` inside string literals.
-- Extend unit/integration tests to cover operator precedence, helper invocation, JSON path errors, and metadata endpoint.
+The expression subsystem lives under `MagicAgent.Api/Application/Expressions` and consists of:
 
-Update this section as syntax or helper contracts evolve so backend and frontend stay aligned.
+1. **Tokenizer & Pratt parser** – Generates an AST for literals, identifiers, helper calls, JSON paths, and unary/binary operators so precedence rules stay centralized.
+2. **Evaluator (`WorkflowExpressionEvaluator`)** – Visits the AST against an `ExpressionContext` (variables, parameters, helper registry, input/lastOutput), handling type coercion, JsonElement traversal, and error capture. It also records references for debugging.
+3. **Helper registry (`WorkflowHelperRegistry`)** – Discovers `[WorkflowHelper]` methods via reflection, provides metadata, and invokes helpers with runtime type coercion.
+4. **Integration seam (`WorkflowPlaceholderResolver`)** – Scans for `{{ }}`/`${{ }}` segments, delegates evaluation, and attaches debug info to `WorkflowParameterDebugInfo` so the frontend can render unresolved/resolved states.
 
-### Expression engine implementation plan
+This layering keeps the workflow runner agnostic of expression details and makes it easy to add helpers without touching core execution code.
 
-We will implement a dedicated expression subsystem under `MagicAgent.Api/Application/Expressions` so it can evolve independently from the workflow runner:
+### Using workflow expressions in practice
 
-1. **Tokenizer & Pratt parser** – Custom lexer + Pratt parser generate an AST representing literals, identifiers, helper calls, JSON path accesses, and unary/binary operators. This keeps precedence rules codified in one place and allows future extensions (comparisons, logical ops) without touching workflow logic.
-2. **Evaluator** – AST visitor that executes expressions against an `ExpressionContext` (variables, parameters, helper registry, input/lastOutput). It manages type coercion, JsonElement traversal, and error capture.
-3. **Helper registry** – Reflection-driven component that discovers `[WorkflowHelper]`-decorated static methods, exposes metadata for the `/api/workflows/helpers` endpoint, and supplies delegates to the evaluator.
-4. **Integration seam** – `WorkflowPlaceholderResolver` treats the expression engine as a black box (`IWorkflowExpressionEvaluator`). The resolver is responsible only for locating `{{ expr }}` segments, delegating evaluation, and wiring debug info.
-
-This separation ensures the workflow engine can swap in a different evaluator (or mock) later by replacing the implementation behind the interface, keeping the core step execution logic untouched.
+1. **Define variables** in upstream steps (agent responses, variable blocks, or tool outputs). Persist both the textual value and the structured `JsonElement`—the evaluator can consume either.
+2. **Reference parameters** with either `{{name}}` (legacy) or `${{ expr }}` when you need math, conditional logic, or helper invocations. Mixed literal/expression strings are supported.
+3. **Inspect debug info** via the Agent Runner UI: each step lists the original expression, the resolved string, and any helper/placeholder errors that occurred during evaluation. Back-end logs contain the same payload for headless troubleshooting.
+4. **Helper discovery** happens automatically: the backend exposes `/api/workflows/helpers`, which the UI renders inside the step configuration drawer so builders can copy helper signatures without leaving the canvas.
+5. **Testing expressions** – Unit tests live under `backend/tests/MagicAgent.Api.Tests/Expressions`. Add coverage whenever you introduce operators or helpers to prevent regressions in precedence/typing rules.
 
 ## Agent Configuration JSON
 
