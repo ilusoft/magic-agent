@@ -26,6 +26,7 @@ export function useWorkflowDialogs({
     openForCreation: openStepDialogForCreation,
     openForEchoCreation,
     openForVariableCreation,
+    openForResetCreation,
   } = useStepDialog({
     draftDocument,
     activeWorkflowId,
@@ -60,6 +61,7 @@ export function useWorkflowDialogs({
     openStepDialogForCreation,
     openEchoStepDialogForCreation: openForEchoCreation,
     openVariableStepDialogForCreation: openForVariableCreation,
+    openResetStepDialogForCreation: openForResetCreation,
     toolDialogProps,
     openToolDialogForNode,
     openToolDialogForCreation,

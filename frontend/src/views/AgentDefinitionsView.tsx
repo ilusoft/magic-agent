@@ -204,6 +204,7 @@ export function AgentDefinitionsView({
     openStepDialogForCreation,
     openEchoStepDialogForCreation,
     openVariableStepDialogForCreation,
+    openResetStepDialogForCreation,
     toolDialogProps,
     openToolDialogForNode,
     openToolDialogForCreation,
@@ -368,6 +369,7 @@ export function AgentDefinitionsView({
                 onAddStep={openStepDialogForCreation}
                 onAddEchoStep={openEchoStepDialogForCreation}
                 onAddVariableStep={openVariableStepDialogForCreation}
+                onAddResetStep={openResetStepDialogForCreation}
                 onAddOutcome={handleAddOutcome}
                 onAddTool={openToolDialogForCreation}
                 onAddStart={handleAddStart}

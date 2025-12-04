@@ -17,6 +17,7 @@ interface OutcomeDialogProps {
     field: "name" | "nextStep" | "order"
   ) => ChangeEventHandler<HTMLInputElement | HTMLSelectElement>;
   onEndWorkflowToggle: ChangeEventHandler<HTMLInputElement>;
+  onExecuteByDefaultToggle: ChangeEventHandler<HTMLInputElement>;
   onExpressionChange: (value: string) => void;
   onDelete?: () => void;
   apiBaseUrl: string;
@@ -35,6 +36,7 @@ export function OutcomeDialog({
   onSubmit,
   onFieldChange,
   onEndWorkflowToggle,
+  onExecuteByDefaultToggle,
   onExpressionChange,
   onDelete,
   apiBaseUrl,
@@ -112,47 +114,64 @@ export function OutcomeDialog({
             End workflow when this outcome occurs
           </label>
 
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase text-foreground/60">
-                Expression
-              </span>
-              <ExpressionBuilderButton
-                value={outcomeForm.expression}
-                onApply={onExpressionChange}
-                apiBaseUrl={apiBaseUrl}
-                mode="direct"
-                renderTrigger={({ open }) => (
-                  <button
-                    type="button"
-                    className="rounded-md border border-border px-2 py-1 text-xs text-foreground/70 hover:bg-muted"
-                    onClick={open}
-                  >
-                    Open builder
-                  </button>
-                )}
-              />
-            </div>
-            <textarea
-              value={outcomeForm.expression}
-              onChange={(event) => onExpressionChange(event.target.value)}
-              className="h-24 w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder={`Example: contains(state.output, "ROUTE: research")`}
+          <label className="flex items-center gap-2 text-sm text-foreground/80">
+            <input
+              type="checkbox"
+              checked={outcomeForm.executeByDefault}
+              onChange={onExecuteByDefaultToggle}
+              className="h-4 w-4 rounded border-border"
             />
-            <p className="text-xs text-foreground/60">
-              Expressions must evaluate to a boolean. Helper functions and
-              workflow data are available inside the builder.
-            </p>
-            {expressionValidationState.status === "pending" ? (
-              <p className="text-xs text-foreground/60">Validating…</p>
-            ) : null}
-            {expressionValidationState.status === "invalid" &&
-            expressionValidationState.message ? (
-              <p className="text-xs text-destructive">
-                {expressionValidationState.message}
+            Execute by default (always run when no other outcome matches)
+          </label>
+
+          {!outcomeForm.executeByDefault ? (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase text-foreground/60">
+                  Expression
+                </span>
+                <ExpressionBuilderButton
+                  value={outcomeForm.expression}
+                  onApply={onExpressionChange}
+                  apiBaseUrl={apiBaseUrl}
+                  mode="direct"
+                  renderTrigger={({ open }) => (
+                    <button
+                      type="button"
+                      className="rounded-md border border-border px-2 py-1 text-xs text-foreground/70 hover:bg-muted"
+                      onClick={open}
+                    >
+                      Open builder
+                    </button>
+                  )}
+                />
+              </div>
+              <textarea
+                value={outcomeForm.expression}
+                onChange={(event) => onExpressionChange(event.target.value)}
+                className="h-24 w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                placeholder={`Example: contains(state.output, "ROUTE: research")`}
+              />
+              <p className="text-xs text-foreground/60">
+                Expressions must evaluate to a boolean. Helper functions and
+                workflow data are available inside the builder.
               </p>
-            ) : null}
-          </div>
+              {expressionValidationState.status === "pending" ? (
+                <p className="text-xs text-foreground/60">Validating…</p>
+              ) : null}
+              {expressionValidationState.status === "invalid" &&
+              expressionValidationState.message ? (
+                <p className="text-xs text-destructive">
+                  {expressionValidationState.message}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="rounded-md border border-dashed border-border/60 bg-muted/20 px-3 py-2 text-xs text-foreground/70">
+              This outcome will run whenever earlier outcomes do not match, so
+              no expression is required.
+            </div>
+          )}
 
           {outcomeFormError ? (
             <p className="text-sm text-destructive">{outcomeFormError}</p>

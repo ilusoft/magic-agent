@@ -6,9 +6,9 @@ using Microsoft.Extensions.AI;
 
 namespace MagicAgent.Api.Application.AgentRunner;
 
-internal static class ChatAgentFactory
+internal static class AgentStepFactory
 {
-    internal static AIAgent CreateChatAgent(
+    internal static AIAgent CreateAgent(
         AgentDefinition definition,
         AgentStepDefinition step,
         IDictionary<string, string> parameters,
@@ -39,11 +39,11 @@ internal static class ChatAgentFactory
     private static IChatClient CreateChatClient(IDictionary<string, string> parameters)
     {
         var endpoint = ResolveConfiguration(parameters, "endpoint")
-            ?? throw new InvalidOperationException("Azure OpenAI endpoint is required for chat steps.");
+            ?? throw new InvalidOperationException("Azure OpenAI endpoint is required for agent steps.");
 
         var deployment = ResolveConfiguration(parameters, "deployment")
             ?? ResolveConfiguration(parameters, "model")
-            ?? throw new InvalidOperationException("Azure OpenAI deployment name is required for chat steps.");
+            ?? throw new InvalidOperationException("Azure OpenAI deployment name is required for agent steps.");
 
         var client = CreateAzureOpenAiClient(new Uri(endpoint), parameters);
         return client.GetChatClient(deployment).AsIChatClient();

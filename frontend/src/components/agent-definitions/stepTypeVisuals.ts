@@ -1,8 +1,8 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  ArrowRightLeft,
   Megaphone,
   MessageSquare,
+  RefreshCcw,
   Variable as VariableIcon,
 } from "lucide-react";
 
@@ -18,14 +18,19 @@ export interface StepTypeVisualConfig {
   handleColor: string;
 }
 
-export const STEP_TYPE_ORDER: StepType[] = ["chat", "echo", "setVariables"];
+export const STEP_TYPE_ORDER: StepType[] = [
+  "agent",
+  "echo",
+  "setVariables",
+  "resetConversation",
+];
 
 export const STEP_TYPE_VISUALS: Record<StepType, StepTypeVisualConfig> = {
-  chat: {
-    type: "chat",
+  agent: {
+    type: "agent",
     icon: MessageSquare,
-    label: "Chat",
-    toolboxLabel: "Chat Step",
+    label: "Agent",
+    toolboxLabel: "Agent Step",
     nodeClass: "border-sky-200 bg-sky-50 text-sky-900",
     iconWrapperClass: "bg-sky-100 text-sky-600",
     handleColor: "rgb(59 130 246)",
@@ -48,10 +53,19 @@ export const STEP_TYPE_VISUALS: Record<StepType, StepTypeVisualConfig> = {
     iconWrapperClass: "bg-emerald-100 text-emerald-600",
     handleColor: "rgb(16 185 129)",
   },
+  resetConversation: {
+    type: "resetConversation",
+    icon: RefreshCcw,
+    label: "Reset Conversation",
+    toolboxLabel: "Reset Conversation",
+    nodeClass: "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-900",
+    iconWrapperClass: "bg-fuchsia-100 text-fuchsia-600",
+    handleColor: "rgb(217 70 239)",
+  },
 };
 
 export const DEFAULT_STEP_VISUAL: StepTypeVisualConfig = {
-  type: "chat",
+  type: "agent",
   icon: MessageSquare,
   label: "Step",
   toolboxLabel: "Step",

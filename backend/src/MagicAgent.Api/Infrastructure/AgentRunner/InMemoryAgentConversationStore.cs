@@ -36,6 +36,15 @@ public sealed class InMemoryAgentConversationStore : IAgentConversationStore
         return Task.CompletedTask;
     }
 
+    public Task DeleteConversationAsync(string conversationId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+
+        _conversations.TryRemove(conversationId, out _);
+
+        return Task.CompletedTask;
+    }
+
     private static AgentMessage CloneMessage(AgentMessage message)
         => new(message.Role, message.Content, message.Timestamp);
 }

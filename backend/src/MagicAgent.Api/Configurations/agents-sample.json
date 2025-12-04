@@ -11,7 +11,7 @@
       "steps": [
         {
           "name": "general chat agent",
-          "type": "chat",
+          "type": "agent",
           "parameters": {
             "systemPrompt": "You are an expert ${{ var.languages.values[iterator] }} translator agent. You should take any input text provided and translate it. The only expected output is the translated text.",
             "message": "{{var.originalInput}}"

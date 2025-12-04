@@ -2,11 +2,11 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using MagicAgent.Api.Application.Expressions;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 using ChatRole = Microsoft.Extensions.AI.ChatRole;
-using MagicAgent.Api.Application.Expressions;
 
 namespace MagicAgent.Api.Application.AgentRunner;
 
@@ -313,9 +313,9 @@ public sealed class DefaultAgentRunner(
       IDictionary<string, WorkflowVariableState> workflowVariableStates,
       CancellationToken cancellationToken)
     {
-        if (step.Type.Equals("chat", StringComparison.OrdinalIgnoreCase))
+        if (step.Type.Equals("agent", StringComparison.OrdinalIgnoreCase))
         {
-            return await ExecuteChatStepAsync(
+            return await ExecuteAgentStepAsync(
               definition,
               step,
               input,
@@ -628,7 +628,7 @@ public sealed class DefaultAgentRunner(
         return materialized;
     }
 
-    private async Task<(AgentStepExecutionResult Result, string? ConversationId, JsonElement? ThreadState, JsonElement? StepThreadContext)> ExecuteChatStepAsync(
+    private async Task<(AgentStepExecutionResult Result, string? ConversationId, JsonElement? ThreadState, JsonElement? StepThreadContext)> ExecuteAgentStepAsync(
       AgentDefinition definition,
       AgentStepDefinition step,
       string? input,
@@ -661,7 +661,7 @@ public sealed class DefaultAgentRunner(
 
         if (string.IsNullOrWhiteSpace(userMessage))
         {
-            throw new InvalidOperationException("Chat agent requires an input message.");
+            throw new InvalidOperationException("Agent step requires an input message.");
         }
 
         var conversationContext = await ConversationContext.CreateAsync(
@@ -677,7 +677,7 @@ public sealed class DefaultAgentRunner(
 
         try
         {
-            var agent = ChatAgentFactory.CreateChatAgent(definition, step, parameters, tools);
+            var agent = AgentStepFactory.CreateAgent(definition, step, parameters, tools);
             AgentThread agentThread;
 
             if (threadState.HasValue)

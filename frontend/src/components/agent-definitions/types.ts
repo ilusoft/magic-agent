@@ -74,9 +74,14 @@ export interface KeyValueEntry {
   dataType?: WorkflowVariableDataType;
 }
 
-export type StepType = "chat" | "echo" | "setVariables";
+export type StepType = "agent" | "echo" | "setVariables" | "resetConversation";
 
-export const STEP_TYPE_OPTIONS: StepType[] = ["chat", "echo", "setVariables"];
+export const STEP_TYPE_OPTIONS: StepType[] = [
+  "agent",
+  "echo",
+  "setVariables",
+  "resetConversation",
+];
 
 export interface StepFormState {
   name: string;
@@ -94,6 +99,7 @@ export interface OutcomeFormState {
   endWorkflow: boolean;
   expression: string;
   order: string;
+  executeByDefault: boolean;
 }
 
 export interface ExpressionValidationState {

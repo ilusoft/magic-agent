@@ -39,6 +39,7 @@ interface OutcomeDialogBindings {
     field: "name" | "nextStep" | "order"
   ) => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void;
   onEndWorkflowToggle: (event: ChangeEvent<HTMLInputElement>) => void;
+  onExecuteByDefaultToggle: (event: ChangeEvent<HTMLInputElement>) => void;
   onExpressionChange: (value: string) => void;
   onDelete?: () => void;
   expressionValidationState: ExpressionValidationState;
@@ -197,6 +198,7 @@ export function useOutcomeDialog({
         endWorkflow: outcome?.endWorkflow ?? false,
         expression: outcome?.condition?.expression ?? "",
         order: resolvedOrder ? String(resolvedOrder) : "",
+        executeByDefault: !Boolean(outcome?.condition?.expression),
       };
     },
     []
@@ -474,6 +476,13 @@ export function useOutcomeDialog({
       return;
     }
 
+    if (outcomeForm.executeByDefault) {
+      if (expressionValidationState.status !== "valid") {
+        setExpressionValidationState({ status: "valid" });
+      }
+      return;
+    }
+
     if (expressionValidationState.status !== "idle") {
       return;
     }
@@ -534,6 +543,8 @@ export function useOutcomeDialog({
         ...baseForm,
         ...overrides,
         order: overrides?.order ?? baseForm.order,
+        executeByDefault:
+          overrides?.executeByDefault ?? baseForm.executeByDefault,
       };
 
       setMode("create");
@@ -575,12 +586,42 @@ export function useOutcomeDialog({
 
   const handleExpressionChange = useCallback(
     (value: string) => {
-      setOutcomeForm((previous) =>
-        previous ? { ...previous, expression: value } : previous
-      );
-      scheduleExpressionValidation(value, validationContext);
+      setOutcomeForm((previous) => {
+        if (!previous) {
+          return previous;
+        }
+
+        const next = { ...previous, expression: value };
+        if (!next.executeByDefault) {
+          scheduleExpressionValidation(value, validationContext);
+        }
+
+        return next;
+      });
     },
     [scheduleExpressionValidation, validationContext]
+  );
+
+  const handleExecuteByDefaultToggle = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const checked = event.target.checked;
+      validationRequestId.current += 1;
+      setOutcomeForm((previous) =>
+        previous ? { ...previous, executeByDefault: checked } : previous
+      );
+
+      if (checked) {
+        setExpressionValidationState({ status: "valid" });
+        return;
+      }
+
+      setExpressionValidationState({ status: "idle" });
+      scheduleExpressionValidation(
+        outcomeForm?.expression ?? "",
+        validationContext
+      );
+    },
+    [scheduleExpressionValidation, validationContext, outcomeForm]
   );
 
   const handleSubmit = useCallback(
@@ -606,7 +647,10 @@ export function useOutcomeDialog({
         return;
       }
 
-      if (!outcomeForm.expression.trim()) {
+      const trimmedExpression = outcomeForm.expression.trim();
+      const requiresExpression = !outcomeForm.executeByDefault;
+
+      if (requiresExpression && !trimmedExpression) {
         setOutcomeFormError("Provide a boolean expression for this outcome.");
         return;
       }
@@ -619,7 +663,7 @@ export function useOutcomeDialog({
         return;
       }
 
-      if (expressionValidationState.status !== "valid") {
+      if (requiresExpression && expressionValidationState.status !== "valid") {
         setOutcomeFormError(
           expressionValidationState.message ??
             "Expression must evaluate to a boolean value."
@@ -627,16 +671,18 @@ export function useOutcomeDialog({
         return;
       }
 
-      const validation = await validateExpression(
-        outcomeForm.expression.trim(),
-        validationContext
-      );
-
-      if (!validation.success) {
-        setOutcomeFormError(
-          validation.error ?? "Expression must evaluate to a boolean value."
+      if (requiresExpression) {
+        const validation = await validateExpression(
+          trimmedExpression,
+          validationContext
         );
-        return;
+
+        if (!validation.success) {
+          setOutcomeFormError(
+            validation.error ?? "Expression must evaluate to a boolean value."
+          );
+          return;
+        }
       }
 
       applyDocumentUpdate((draft) => {
@@ -664,11 +710,17 @@ export function useOutcomeDialog({
             ? undefined
             : outcomeForm.nextStep.trim() || undefined,
           endWorkflow: outcomeForm.endWorkflow || undefined,
-          condition: {
-            expression: outcomeForm.expression.trim(),
-          },
           order: parsedOrder,
         };
+
+        if (requiresExpression) {
+          updatedOutcome.condition = {
+            expression: trimmedExpression,
+          };
+        } else {
+          delete (updatedOutcome as Partial<AgentStepOutcomeDefinition>)
+            .condition;
+        }
 
         if (!updatedOutcome.endWorkflow) {
           delete (updatedOutcome as Partial<AgentStepOutcomeDefinition>)
@@ -790,12 +842,15 @@ export function useOutcomeDialog({
       onSubmit: handleSubmit,
       onFieldChange: handleFieldChange,
       onEndWorkflowToggle: handleEndWorkflowToggle,
+      onExecuteByDefaultToggle: handleExecuteByDefaultToggle,
       onExpressionChange: handleExpressionChange,
       onDelete: mode === "edit" ? handleDelete : undefined,
       apiBaseUrl,
       expressionValidationState,
       saveDisabled:
-        !outcomeForm || expressionValidationState.status !== "valid",
+        !outcomeForm ||
+        (!outcomeForm.executeByDefault &&
+          expressionValidationState.status !== "valid"),
     },
     openForEdge,
     openForCreation,

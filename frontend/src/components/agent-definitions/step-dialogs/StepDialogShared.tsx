@@ -50,6 +50,7 @@ export interface StepDialogBaseProps {
 export interface StandardStepDialogProps extends StepDialogBaseProps {
   showConversationToggle?: boolean;
   showTools?: boolean;
+  showParameters?: boolean;
 }
 
 interface ExpandedEditorHandle {
@@ -347,6 +348,7 @@ export function useExpandedValueEditor(
 export function StandardStepDialog({
   showConversationToggle = true,
   showTools = true,
+  showParameters = true,
   ...props
 }: StandardStepDialogProps) {
   const expandedEditor = useExpandedValueEditor(props.onParameterChange);
@@ -373,14 +375,16 @@ export function StandardStepDialog({
             onChange={props.onConversationToggle}
           />
         ) : null}
-        <ParameterList
-          entries={props.stepForm.parameters}
-          onAdd={props.onAddParameter}
-          onRemove={props.onRemoveParameter}
-          onParameterChange={props.onParameterChange}
-          onExpandValue={expandedEditor.open}
-          apiBaseUrl={props.apiBaseUrl}
-        />
+        {showParameters ? (
+          <ParameterList
+            entries={props.stepForm.parameters}
+            onAdd={props.onAddParameter}
+            onRemove={props.onRemoveParameter}
+            onParameterChange={props.onParameterChange}
+            onExpandValue={expandedEditor.open}
+            apiBaseUrl={props.apiBaseUrl}
+          />
+        ) : null}
         {showTools && props.availableTools.length > 0 ? (
           <div className="space-y-2">
             <span className="text-xs font-semibold uppercase text-foreground/60">

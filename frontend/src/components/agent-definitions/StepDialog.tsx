@@ -1,9 +1,10 @@
 import { DialogShell } from "./DialogShell";
 import type { StepFormState } from "./types";
 import type { StepDialogBaseProps } from "./step-dialogs/StepDialogShared";
-import { ChatStepDialog } from "./step-dialogs/ChatStepDialog";
+import { AgentStepDialog } from "./step-dialogs/AgentStepDialog";
 import { EchoStepDialog } from "./step-dialogs/EchoStepDialog";
 import { VariableStepDialog } from "./step-dialogs/VariableStepDialog";
+import { ResetConversationStepDialog } from "./step-dialogs/ResetConversationStepDialog";
 
 interface StepDialogProps extends Omit<StepDialogBaseProps, "stepForm"> {
   stepForm: StepFormState | null;
@@ -15,9 +16,11 @@ function formatStepTypeLabel(type: StepFormState["type"]) {
       return "Variable Step";
     case "echo":
       return "Echo Step";
-    case "chat":
+    case "resetConversation":
+      return "Reset Conversation";
+    case "agent":
     default:
-      return "Chat Step";
+      return "Agent Step";
   }
 }
 
@@ -51,8 +54,17 @@ export function StepDialog(props: StepDialogProps) {
       return <VariableStepDialog {...sharedProps} />;
     case "echo":
       return <EchoStepDialog {...sharedProps} />;
-    case "chat":
+    case "resetConversation":
+      return (
+        <ResetConversationStepDialog
+          {...sharedProps}
+          showConversationToggle={false}
+          showTools={false}
+          showParameters={false}
+        />
+      );
+    case "agent":
     default:
-      return <ChatStepDialog {...sharedProps} />;
+      return <AgentStepDialog {...sharedProps} />;
   }
 }

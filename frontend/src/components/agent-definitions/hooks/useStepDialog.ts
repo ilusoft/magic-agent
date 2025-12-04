@@ -34,12 +34,13 @@ interface UseStepDialogOptions {
 }
 
 const STEP_TYPE_PARAMETER_TEMPLATES: Record<StepType, string[]> = {
-  chat: ["systemPrompt", "message"],
+  agent: ["systemPrompt", "message"],
   echo: ["message"],
   setVariables: [],
+  resetConversation: [],
 };
 
-const DEFAULT_STEP_TYPE: StepType = "chat";
+const DEFAULT_STEP_TYPE: StepType = "agent";
 
 function coerceStepType(value: string | undefined): StepType {
   if (value === "pass-through") {
@@ -169,6 +170,7 @@ interface UseStepDialogResult {
     onConversationToggle: (event: ChangeEvent<HTMLInputElement>) => void;
     onAddParameter: () => void;
     onRemoveParameter: (entryId: string) => void;
+    onMoveParameter?: (entryId: string, direction: "up" | "down") => void;
     onParameterChange: (
       entryId: string,
       field: "key" | "value"
@@ -189,6 +191,7 @@ interface UseStepDialogResult {
   openForCreation: () => void;
   openForEchoCreation: () => void;
   openForVariableCreation: () => void;
+  openForResetCreation: () => void;
   reset: () => void;
 }
 
@@ -326,7 +329,7 @@ export function useStepDialog({
   }, []);
 
   const openForCreation = useCallback(
-    () => openForTypeCreation("chat"),
+    () => openForTypeCreation("agent"),
     [openForTypeCreation]
   );
 
@@ -337,6 +340,11 @@ export function useStepDialog({
 
   const openForVariableCreation = useCallback(
     () => openForTypeCreation("setVariables"),
+    [openForTypeCreation]
+  );
+
+  const openForResetCreation = useCallback(
+    () => openForTypeCreation("resetConversation"),
     [openForTypeCreation]
   );
 
@@ -362,15 +370,17 @@ export function useStepDialog({
                   ? entry.dataType ?? "string"
                   : undefined,
             }));
+            const isVariableStep = nextType === "setVariables";
+            const isResetStep = nextType === "resetConversation";
             return {
               ...previous,
               type: nextType,
               parameters: normalizedParameters,
               conversationEnabled:
-                nextType === "setVariables"
+                isVariableStep || isResetStep
                   ? false
                   : previous.conversationEnabled,
-              tools: nextType === "setVariables" ? [] : previous.tools ?? [],
+              tools: isVariableStep || isResetStep ? [] : previous.tools ?? [],
             };
           }
 
@@ -697,7 +707,7 @@ export function useStepDialog({
       title,
       stepForm,
       stepFormError,
-      workflowParameters: workflowParameters,
+      workflowParameters,
       apiBaseUrl,
       onClose: reset,
       onSubmit: handleSubmit,
@@ -718,6 +728,7 @@ export function useStepDialog({
     openForCreation,
     openForEchoCreation,
     openForVariableCreation,
+    openForResetCreation,
     reset,
   };
 }

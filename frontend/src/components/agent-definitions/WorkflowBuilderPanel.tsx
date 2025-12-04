@@ -6,6 +6,7 @@ interface WorkflowBuilderPanelProps {
   onAddStep: () => void;
   onAddEchoStep: () => void;
   onAddVariableStep: () => void;
+  onAddResetStep: () => void;
   onAddOutcome: () => void;
   onAddTool: () => void;
   onAddStart: () => void;
@@ -18,6 +19,7 @@ export function WorkflowBuilderPanel({
   onAddStep,
   onAddEchoStep,
   onAddVariableStep,
+  onAddResetStep,
   onAddOutcome,
   onAddTool,
   onAddStart,
@@ -31,6 +33,7 @@ export function WorkflowBuilderPanel({
         onAddStep={onAddStep}
         onAddEchoStep={onAddEchoStep}
         onAddVariableStep={onAddVariableStep}
+        onAddResetStep={onAddResetStep}
         onAddOutcome={onAddOutcome}
         onAddTool={onAddTool}
         onAddStart={onAddStart}

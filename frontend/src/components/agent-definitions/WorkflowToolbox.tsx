@@ -8,20 +8,22 @@ interface WorkflowToolboxProps {
   onAddStep: () => void;
   onAddEchoStep: () => void;
   onAddVariableStep: () => void;
+  onAddResetStep: () => void;
   onAddOutcome: () => void;
   onAddTool: () => void;
   onAddStart: () => void;
   onAddTermination: () => void;
 }
 
-const CHAT_STEP_VISUAL = STEP_TYPE_VISUALS.chat;
+const AGENT_STEP_VISUAL = STEP_TYPE_VISUALS.agent;
 const ECHO_STEP_VISUAL = STEP_TYPE_VISUALS.echo;
 const VARIABLE_STEP_VISUAL = STEP_TYPE_VISUALS.setVariables;
+const RESET_STEP_VISUAL = STEP_TYPE_VISUALS.resetConversation;
 
 const TOOLBOX_ACTIONS = [
   {
-    label: CHAT_STEP_VISUAL.toolboxLabel,
-    icon: CHAT_STEP_VISUAL.icon,
+    label: AGENT_STEP_VISUAL.toolboxLabel,
+    icon: AGENT_STEP_VISUAL.icon,
     action: (props: WorkflowToolboxProps) => props.onAddStep(),
   },
   {
@@ -33,6 +35,11 @@ const TOOLBOX_ACTIONS = [
     label: VARIABLE_STEP_VISUAL.toolboxLabel,
     icon: VARIABLE_STEP_VISUAL.icon,
     action: (props: WorkflowToolboxProps) => props.onAddVariableStep(),
+  },
+  {
+    label: RESET_STEP_VISUAL.toolboxLabel,
+    icon: RESET_STEP_VISUAL.icon,
+    action: (props: WorkflowToolboxProps) => props.onAddResetStep(),
   },
   {
     label: "Outcome",
