@@ -20,19 +20,20 @@ export function useWorkflowDialogs({
   applyDocumentUpdate,
   apiBaseUrl,
 }: UseWorkflowDialogsOptions) {
-  const {
-    dialogProps,
-    openForEditing: openStepDialogForNode,
-    openForCreation: openStepDialogForCreation,
-    openForEchoCreation,
-    openForVariableCreation,
-    openForResetCreation,
-  } = useStepDialog({
+  const { dialogProps, openers: stepDialogOpeners } = useStepDialog({
     draftDocument,
     activeWorkflowId,
     applyDocumentUpdate,
     apiBaseUrl,
   });
+
+  const {
+    openForEditing: openStepDialogForNode,
+    openForCreation: openStepDialogForCreation,
+    openForEchoCreation,
+    openForVariableCreation,
+    openForResetCreation,
+  } = stepDialogOpeners;
 
   const {
     dialogProps: toolDialogProps,

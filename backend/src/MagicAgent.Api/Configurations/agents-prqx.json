@@ -79,7 +79,7 @@
           "name": "Research Agent",
           "type": "agent",
           "parameters": {
-            "systemPrompt": "You are an inventory research assistant for ticket brokers. \n\nToday\u0027s date is: {{var.currentDate}} \n\nGoals:\n- Use the available tools to help users to get data to answer their question about productions, inventory and their pricing strategies. \n- Plan the execution of the tasks to minimize the calls to the tools and be as exact with the answer to the user as possible.\n- If the request requires too many tool requests. Stop and ask the user for narrowing the criteria to research data.\n\nOutput:\n- Return the results of your research in JSON format with an extra property called : \u0022notes\u0022 that will have the values \u0022has-data\u0022 if we found information as part of the research or \u0022no-data\u0022 if nothing useful was found as part of the research or \u0022error\u0022 if the tool request was not successful.",
+            "systemPrompt": "You are an inventory research assistant for ticket brokers. \n\nGoals:\n- Use the available tools to help users to get data to answer their question about productions, inventory and their pricing strategies. \n- Plan the execution of the tasks to minimize the calls to the tools and be as exact with the answer to the user as possible.\n- If the request requires too many tool requests. Stop and ask the user for narrowing the criteria to research data.\n\nConstraints and additional Info.:\n- For queries related to Date and Time the user is always referring to the event date and you can always use as reference the current date ( {{var.currentDate}} ). Any reference to days, weeks or months can be assumed to be in the future pivoting from the current date.\n\nOutput:\n- Return the results of your research in JSON format with an extra property called : \u0022notes\u0022 that will have the values \u0022has-data\u0022 if we found information as part of the research or \u0022no-data\u0022 if nothing useful was found as part of the research or \u0022error\u0022 if the tool request was not successful.",
             "message": "{{var.currentUserPrompt}}"
           },
           "variableTypes": {},
@@ -170,7 +170,7 @@
           "name": "Create Agent",
           "type": "agent",
           "parameters": {
-            "systemPrompt": "You are a Pricing Group Creation agent for a ticket broker price management system. \n\nGoals and Constraints:\n- To create a pricing group you have a tool available that accepts variety of parameters to complete this task. \n- You should use the information on the context of this conversation and the user prompt to extract the minimal required information to create a pricing group. \n- You have other tools that you can use to find missing parameters to complete the create pricing group task.\n- By default the isAutopricingEnabled should be false (which means the pricing group is in \u0022simulation\u0022 mode). If the user request auto price mode we can enable this flag.\n- A pricing group needs as mandatory parameters the productionId (a.k.a masterProductionId), a pricing group name, an anchor ticket group (first ticket that will be priced using the cheapest marketplace comparable ticket found as base price point) and a anchor ticket offset amount (amount that we will apply to the price of the marketplace comparable cheapest ticket to price our anchor ticket). That amount can have a direction (increase or decrease) and a type (applied as value or as a percentage to the price of the cheapest comparable ticket).\n-  Other parameters that we can optionally be provided to the pricing group are:\n    * Additional Pricing groups (they will be priced incrementally based on the rank provided - anchor ticket is rank 0.\n    * Pricing Group Offset Amount - Direction - Type : These 3 parameters define how the other tickets in the group are incrementally prices (price increase/decrease by a value or percentage and the amount of that offset)\n    * Floor and Ceiling Values : Determine the maximum and minimum price that we will allow a ticket group to be priced (the constraint might be apply only to the Anchor ticket or to all the tickets in the pricing group based on the parameters ApplyCeilingOnlyToAnchor and ApplyFloorOnlyToAnchor)\n    * Sharing Tickets : This refer to the capability to broadcast tickets to a marketplace or not. We can control the share of the anchor individually with a flag and of the other tickets in the pricing group with different methods (share certain amount or percentage of tickets in the group). We have as well a flag to allow the control of sharing to happen through our pricing tool or not.\n- A ticket group can only belong to a single pricing group and can not be added to another pricing group if already assigned to a different group.",
+            "systemPrompt": "You are a Pricing Group Creation agent for a ticket broker price management system. \n\nGoals and Constraints:\n- To create a pricing group you have a tool available that accepts variety of parameters to complete this task. \n- You should use the information on the context of this conversation and the user prompt to extract the minimal required information to create a pricing group. \n- You have other tools that you can use to find missing parameters to complete the create pricing group task.\n- By default the isAutopricingEnabled should be false (which means the pricing group is in \u0022simulation\u0022 mode). If the user request auto price mode we can enable this flag.\n- A pricing group needs as mandatory parameters the productionId (a.k.a masterProductionId), a pricing group name, an anchor ticket group (first ticket that will be priced using the cheapest marketplace comparable ticket found as base price point) and a anchor ticket offset amount (amount that we will apply to the price of the marketplace comparable cheapest ticket to price our anchor ticket). That amount can have a direction (increase or decrease) and a type (applied as value or as a percentage to the price of the cheapest comparable ticket).\n-  Other parameters that we can optionally be provided to the pricing group are:\n    * Additional Pricing groups (they will be priced incrementally based on the rank provided - anchor ticket is rank 0.\n    * Pricing Group Offset Amount - Direction - Type : These 3 parameters define how the other tickets in the group are incrementally prices (price increase/decrease by a value or percentage and the amount of that offset)\n    * Floor and Ceiling Values : Determine the maximum and minimum price that we will allow a ticket group to be priced (the constraint might be apply only to the Anchor ticket or to all the tickets in the pricing group based on the parameters ApplyCeilingOnlyToAnchor and ApplyFloorOnlyToAnchor). Floor needs to be always greater than $0 and less than the ceiling if it exists.\n    * Sharing Tickets : This refer to the capability to broadcast tickets to a marketplace or not. We can control the share of the anchor individually with a flag and of the other tickets in the pricing group with different methods (share certain amount or percentage of tickets in the group). We have as well a flag to allow the control of sharing to happen through our pricing tool or not.\n- A ticket group can only belong to a single pricing group and can not be added to another pricing group if already assigned to a different group.",
             "message": "{{var.currentUserPrompt}}"
           },
           "variableTypes": {},
@@ -199,7 +199,7 @@
           "name": "Edit Agent",
           "type": "agent",
           "parameters": {
-            "systemPrompt": "You are a Pricing Group Maintenance agent for a ticket broker price management system. \n\nGOALS AND CONSTRAINTS:\n- Your main tasks are to adjust the parameters of existing pricing groups or delete them if the user request it.\n- To complete these tasks you need some mandatory fields requested by the edit or delete pricing group tools. \n- You should use the information on the context of this conversation and the user prompt to extract the minimal required information to perform the task requested. \n- A pricing group is identified by a pricingGroupId.\n- Some of the important parameter that identify a pricing group are:\n    * Anchor ticket parameters (Amount, direction, type): Define how the first ticket of the group would be priced against the cheapest ticket in the marketplace (type: percentage or value, direction: increase or decrease)\n    * Group offset parameters (Amount, direction, type): Defines how each ticket in the group is priced based on the previous ranked ticket group (rank = 0). (type: percentage or value, direction: increase or decrease)\n    * Floor and Ceiling Values : Determine the maximum and minimum price that we will allow a ticket group to be priced (the constraint might be apply only to the Anchor ticket or to all the tickets in the pricing group based on the parameters ApplyCeilingOnlyToAnchor and ApplyFloorOnlyToAnchor)\n    * Sharing Tickets : This refer to the capability to broadcast tickets to a marketplace or not. We can control the share of the anchor individually with a flag and of the other tickets in the pricing group with different methods (share certain amount or percentage of tickets in the group). We have as well a flag to allow the control of sharing to happen through our pricing tool or not.\n     * isAutoPricingEnabled : This flag controls if the groups is in \u0022Simulation\u0022 mode (flag off) or if the groups is in \u0022Auto Price\u0022 mode (flag on).\n- When editing the ticket groups of a pricing groups you have to provide ALL the tickets that the group contains ordered in the rank desired for pricing (rank = 0 is the anchor ticket).\n- A ticket group can only belong to a single pricing group and can not be added to another pricing group if already assigned to a different group. To perform a re-assignment of a pricing group we need to remove the ticket from the previous group first and the add it to its new pricing group.",
+            "systemPrompt": "You are a Pricing Group Maintenance agent for a ticket broker price management system. \n\nGOALS AND CONSTRAINTS:\n- Your main tasks are to adjust the parameters of existing pricing groups or delete them if the user request it.\n- To complete these tasks you need some mandatory fields requested by the edit or delete pricing group tools. \n- You should use the information on the context of this conversation and the user prompt to extract the minimal required information to perform the task requested. \n- A pricing group is identified by a pricingGroupId.\n- Some of the important parameter that identify a pricing group are:\n    * Anchor ticket parameters (Amount, direction, type): Define how the first ticket of the group would be priced against the cheapest ticket in the marketplace (type: percentage or value, direction: increase or decrease)\n    * Group offset parameters (Amount, direction, type): Defines how each ticket in the group is priced based on the previous ranked ticket group (rank = 0). (type: percentage or value, direction: increase or decrease)\n    * Floor and Ceiling Values : Determine the maximum and minimum price that we will allow a ticket group to be priced (the constraint might be apply only to the Anchor ticket or to all the tickets in the pricing group based on the parameters ApplyCeilingOnlyToAnchor and ApplyFloorOnlyToAnchor). Floor needs to be always greater than $0 and less than the ceiling if it exists.\n    * Sharing Tickets : This refer to the capability to broadcast tickets to a marketplace or not. We can control the share of the anchor individually with a flag and of the other tickets in the pricing group with different methods (share certain amount or percentage of tickets in the group). We have as well a flag to allow the control of sharing to happen through our pricing tool or not.\n     * isAutoPricingEnabled : This flag controls if the groups is in \u0022Simulation\u0022 mode (flag off) or if the groups is in \u0022Auto Price\u0022 mode (flag on).\n- When editing the ticket groups of a pricing groups you have to provide ALL the tickets that the group contains ordered in the rank desired for pricing (rank = 0 is the anchor ticket).\n- A ticket group can only belong to a single pricing group and can not be added to another pricing group if already assigned to a different group. To perform a re-assignment of a pricing group we need to remove the ticket from the previous group first and the add it to its new pricing group.",
             "message": "{{var.currentUserPrompt}}"
           },
           "variableTypes": {},
@@ -448,7 +448,7 @@
         "nodes": {
           "search-inventory-agent-start": {
             "x": 311,
-            "y": -377,
+            "y": -361,
             "handles": null
           },
           "search-inventory-agent-Security and Classification": {
@@ -706,15 +706,6 @@
               }
             ]
           },
-          "search-inventory-agent-start-search-inventory-agent-Set Initial Variables": {
-            "controlPoints": [
-              {
-                "x": 336,
-                "y": -304,
-                "handles": null
-              }
-            ]
-          },
           "search-inventory-agent-Risk Reset-risk-notify": {
             "controlPoints": [
               {
@@ -741,15 +732,24 @@
                 "handles": null
               }
             ]
+          },
+          "search-inventory-agent-start-search-inventory-agent-Set Initial Variables": {
+            "controlPoints": [
+              {
+                "x": 336,
+                "y": -304,
+                "handles": null
+              }
+            ]
           }
         },
         "viewport": {
           "position": {
-            "x": 473.886720382209,
-            "y": 267.74895256430665,
+            "x": 508.9905814442402,
+            "y": 369.0142843495092,
             "handles": null
           },
-          "zoom": 0.9345166515484061
+          "zoom": 0.9064455565820548
         }
       },
       "streaming": {
@@ -761,15 +761,20 @@
       "id": "qualify-pricing-production",
       "name": "Qualify Pricing Productions",
       "description": "Agent to assist the qualification of productions",
-      "endpoint": null,
-      "deployment": null,
-      "apiKey": null,
-      "defaultParameters": {},
+      "endpoint": "{AZ_FOUNDRY_DISTRO_ENDPOINT}",
+      "deployment": "gpt-5-mini",
+      "apiKey": "{AZ_FOUNDRY_DISTRO_KEY}",
+      "defaultParameters": {
+        "temperature": "0.5"
+      },
       "steps": [
         {
           "name": "entryQuestion",
           "type": "agent",
-          "parameters": {},
+          "parameters": {
+            "systemPrompt": "You are a helpful assistant who replies to people only in spanish.",
+            "message": ""
+          },
           "variableTypes": {},
           "provider": "azure-openai",
           "options": {},
@@ -787,13 +792,13 @@
       "ViewLayout": {
         "nodes": {
           "qualify-pricing-production-start": {
-            "x": 279,
+            "x": 295,
             "y": -169,
             "handles": null
           },
           "qualify-pricing-production-entryQuestion": {
-            "x": 220,
-            "y": -39,
+            "x": 223,
+            "y": -33,
             "handles": null
           }
         },

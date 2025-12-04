@@ -1,156 +1,27 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
-import type {
-  AgentDefinition,
-  AgentDefinitionsDocument,
-  AgentStepDefinition,
-  AgentToolDefinition,
-} from "../../../types/agents";
+import type { AgentDefinitionsDocument } from "../../../types/agents";
 import {
-  STEP_TYPE_OPTIONS,
   type StepFormState,
-  type StepType,
-  type WorkflowNode,
   type KeyValueEntry,
   type WorkflowVariableDataType,
 } from "../types";
+import { useWorkflowAgentContext } from "./useWorkflowAgentContext";
+import { useStepDialogState } from "./useStepDialogState";
+import { useStepForm } from "./useStepForm";
+import type { ApplyDocumentUpdate } from "./types";
+import { useStepPersistence } from "./useStepPersistence";
 import {
-  createKeyValueEntry,
-  entriesFromRecord,
-  recordFromEntries,
-  variableTypesFromEntries,
-} from "../util";
-
-type ApplyDocumentUpdate = (
-  updater: (draft: AgentDefinitionsDocument) => AgentDefinitionsDocument | void
-) => void;
+  type StepDialogOpeners,
+  useStepDialogOpeners,
+} from "./useStepDialogOpeners";
 
 interface UseStepDialogOptions {
   draftDocument: AgentDefinitionsDocument | null;
   activeWorkflowId: string | null;
   applyDocumentUpdate: ApplyDocumentUpdate;
   apiBaseUrl: string;
-}
-
-const STEP_TYPE_PARAMETER_TEMPLATES: Record<StepType, string[]> = {
-  agent: ["systemPrompt", "message"],
-  echo: ["message"],
-  setVariables: [],
-  resetConversation: [],
-};
-
-const DEFAULT_STEP_TYPE: StepType = "agent";
-
-function coerceStepType(value: string | undefined): StepType {
-  if (value === "pass-through") {
-    return "setVariables";
-  }
-
-  if (value && STEP_TYPE_OPTIONS.includes(value as StepType)) {
-    return value as StepType;
-  }
-
-  return DEFAULT_STEP_TYPE;
-}
-
-function ensureParametersForStepType(
-  type: StepType,
-  currentParameters: KeyValueEntry[]
-): KeyValueEntry[] {
-  const templateKeys = STEP_TYPE_PARAMETER_TEMPLATES[type] ?? [];
-
-  if (templateKeys.length === 0) {
-    return currentParameters;
-  }
-
-  const existingByKey = new Map(
-    currentParameters.map((entry) => [entry.key, entry])
-  );
-
-  const templateEntries = templateKeys.map((key) => {
-    const existing = existingByKey.get(key);
-
-    if (existing) {
-      return existing;
-    }
-
-    return createKeyValueEntry(key);
-  });
-
-  const extras = currentParameters.filter(
-    (entry) => !templateKeys.includes(entry.key)
-  );
-
-  return [...templateEntries, ...extras];
-}
-
-function renameStepReferences(
-  agent: AgentDefinition,
-  originalName: string,
-  nextName: string
-) {
-  if (!originalName || !nextName || originalName === nextName) {
-    return;
-  }
-
-  agent.steps.forEach((step) => {
-    step.outcomes?.forEach((outcome) => {
-      if (outcome.nextStep === originalName) {
-        outcome.nextStep = nextName;
-      }
-    });
-  });
-
-  const oldNodeId = `${agent.id}-${originalName}`;
-  const newNodeId = `${agent.id}-${nextName}`;
-
-  if (agent.ViewLayout?.nodes) {
-    moveLayoutEntry(agent.ViewLayout.nodes, oldNodeId, newNodeId);
-    moveLayoutEntry(agent.ViewLayout.nodes, originalName, nextName);
-  }
-
-  if (agent.ViewLayout?.edges) {
-    renameLayoutEdgeKeys(agent.ViewLayout.edges, oldNodeId, newNodeId);
-  }
-}
-
-function moveLayoutEntry<T>(
-  collection: Record<string, T>,
-  oldKey: string,
-  newKey: string
-) {
-  if (!collection || oldKey === newKey || !(oldKey in collection)) {
-    return;
-  }
-
-  collection[newKey] = collection[oldKey];
-  delete collection[oldKey];
-}
-
-function renameLayoutEdgeKeys(
-  edges: Record<string, { controlPoints?: { x: number; y: number }[] }>,
-  oldNodeId: string,
-  newNodeId: string
-) {
-  if (!edges || oldNodeId === newNodeId) {
-    return;
-  }
-
-  Object.entries(edges).forEach(([edgeId, layout]) => {
-    if (!edgeId.includes(oldNodeId)) {
-      return;
-    }
-
-    const updatedKey = edgeId.split(oldNodeId).join(newNodeId);
-
-    if (updatedKey === edgeId) {
-      return;
-    }
-
-    edges[updatedKey] = layout;
-    delete edges[edgeId];
-  });
 }
 
 interface UseStepDialogResult {
@@ -187,11 +58,7 @@ interface UseStepDialogResult {
   };
   title: string;
   open: boolean;
-  openForEditing: (workflowNode: WorkflowNode) => void;
-  openForCreation: () => void;
-  openForEchoCreation: () => void;
-  openForVariableCreation: () => void;
-  openForResetCreation: () => void;
+  openers: StepDialogOpeners;
   reset: () => void;
 }
 
@@ -201,428 +68,77 @@ export function useStepDialog({
   applyDocumentUpdate,
   apiBaseUrl,
 }: UseStepDialogOptions): UseStepDialogResult {
-  const [isOpen, setIsOpen] = useState(false);
-  const [mode, setMode] = useState<"create" | "edit">("edit");
-  const [dialogTarget, setDialogTarget] = useState<WorkflowNode | null>(null);
-  const [stepForm, setStepForm] = useState<StepFormState | null>(null);
-  const [stepFormError, setStepFormError] = useState<string | null>(null);
+  const {
+    stepForm,
+    stepFormError,
+    setStepFormState,
+    setStepFormError,
+    resetFormState,
+    handleFieldChange,
+    handleConversationToggle,
+    handleAddParameter,
+    handleRemoveParameter,
+    handleMoveParameter,
+    handleParameterChange,
+    handleParameterDataTypeChange,
+    handleToolToggle,
+  } = useStepForm();
   const [stepOriginalName, setStepOriginalName] = useState<string | null>(null);
-
-  const availableTools = useMemo(() => {
-    if (!draftDocument || !activeWorkflowId) {
-      return [] as { id: string; label: string }[];
+  const { agent, availableTools, workflowParameters } = useWorkflowAgentContext(
+    {
+      draftDocument,
+      activeWorkflowId,
     }
-
-    const agent = draftDocument.agents.find(
-      (candidate) => candidate.id === activeWorkflowId
-    );
-
-    if (!agent || !Array.isArray(agent.tools)) {
-      return [] as { id: string; label: string }[];
-    }
-
-    return agent.tools
-      .filter((tool): tool is AgentToolDefinition => Boolean(tool?.id))
-      .map((tool) => ({ id: tool.id, label: tool.name?.trim() || tool.id }));
-  }, [draftDocument, activeWorkflowId]);
-
-  const workflowParameters = useMemo(() => {
-    if (!draftDocument || !activeWorkflowId) {
-      return [] as KeyValueEntry[];
-    }
-
-    const agent = draftDocument.agents.find(
-      (candidate) => candidate.id === activeWorkflowId
-    );
-
-    if (!agent) {
-      return [] as KeyValueEntry[];
-    }
-
-    const parameterEntries = entriesFromRecord(agent.defaultParameters);
-    return parameterEntries.length > 0 ? parameterEntries : [];
-  }, [draftDocument, activeWorkflowId]);
+  );
+  const {
+    open,
+    mode,
+    title,
+    openDialog,
+    reset: resetDialogState,
+  } = useStepDialogState();
+  const { persistStepWithValidation, deleteStepWithValidation } =
+    useStepPersistence({
+      applyDocumentUpdate,
+    });
 
   const reset = useCallback(() => {
-    setIsOpen(false);
-    setMode("edit");
-    setDialogTarget(null);
-    setStepForm(null);
-    setStepFormError(null);
+    resetDialogState();
+    resetFormState();
     setStepOriginalName(null);
-  }, []);
+  }, [resetDialogState, resetFormState]);
 
-  const openForEditing = useCallback(
-    (workflowNode: WorkflowNode) => {
-      if (!draftDocument || !activeWorkflowId) {
-        setStepForm(null);
-        setStepFormError("Unable to locate workflow for editing.");
-        setStepOriginalName(null);
-        setMode("edit");
-        setDialogTarget(workflowNode);
-        setIsOpen(true);
-        return;
-      }
-
-      const agent = draftDocument.agents.find(
-        (candidate) => candidate.id === activeWorkflowId
-      );
-
-      if (!agent) {
-        setStepForm(null);
-        setStepFormError("Unable to locate agent for this workflow.");
-        setStepOriginalName(null);
-        setMode("edit");
-        setDialogTarget(workflowNode);
-        setIsOpen(true);
-        return;
-      }
-
-      const targetStepName = workflowNode.data.stepName;
-      const existingStep = targetStepName
-        ? agent.steps.find((step) => step.name === targetStepName)
-        : undefined;
-
-      const parameterEntries = entriesFromRecord(
-        existingStep?.parameters,
-        existingStep?.variableTypes
-      );
-      const stepType = coerceStepType(existingStep?.type);
-      const ensuredEntries = ensureParametersForStepType(
-        stepType,
-        parameterEntries
-      );
-      const selectedTools = Array.isArray(existingStep?.tools)
-        ? existingStep?.tools.filter((toolId) => typeof toolId === "string")
-        : [];
-
-      setStepForm({
-        name: existingStep?.name ?? targetStepName ?? "",
-        type: stepType,
-        conversationEnabled: existingStep?.conversation?.enabled ?? false,
-        parameters: ensuredEntries,
-        tools: selectedTools,
-        variableTypes: existingStep?.variableTypes,
-      });
-      setStepFormError(null);
-      setStepOriginalName(existingStep?.name ?? targetStepName ?? null);
-      setMode("edit");
-      setDialogTarget(workflowNode);
-      setIsOpen(true);
-    },
-    [draftDocument, activeWorkflowId]
-  );
-
-  const openForTypeCreation = useCallback((initialType: StepType) => {
-    setStepForm({
-      name: "",
-      type: initialType,
-      conversationEnabled: false,
-      parameters: ensureParametersForStepType(initialType, []),
-      tools: [],
-    });
-    setStepFormError(null);
-    setStepOriginalName(null);
-    setMode("create");
-    setDialogTarget(null);
-    setIsOpen(true);
-  }, []);
-
-  const openForCreation = useCallback(
-    () => openForTypeCreation("agent"),
-    [openForTypeCreation]
-  );
-
-  const openForEchoCreation = useCallback(
-    () => openForTypeCreation("echo"),
-    [openForTypeCreation]
-  );
-
-  const openForVariableCreation = useCallback(
-    () => openForTypeCreation("setVariables"),
-    [openForTypeCreation]
-  );
-
-  const openForResetCreation = useCallback(
-    () => openForTypeCreation("resetConversation"),
-    [openForTypeCreation]
-  );
-
-  const handleFieldChange = useCallback(
-    (field: "name" | "type") =>
-      (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-        const value = event.target.value;
-        setStepForm((previous) => {
-          if (!previous) {
-            return previous;
-          }
-
-          if (field === "type") {
-            const nextType = coerceStepType(value);
-            const nextParameters = ensureParametersForStepType(
-              nextType,
-              previous.parameters ?? []
-            );
-            const normalizedParameters = nextParameters.map((entry) => ({
-              ...entry,
-              dataType:
-                nextType === "setVariables"
-                  ? entry.dataType ?? "string"
-                  : undefined,
-            }));
-            const isVariableStep = nextType === "setVariables";
-            const isResetStep = nextType === "resetConversation";
-            return {
-              ...previous,
-              type: nextType,
-              parameters: normalizedParameters,
-              conversationEnabled:
-                isVariableStep || isResetStep
-                  ? false
-                  : previous.conversationEnabled,
-              tools: isVariableStep || isResetStep ? [] : previous.tools ?? [],
-            };
-          }
-
-          return { ...previous, [field]: value };
-        });
-      },
-    []
-  );
-
-  const handleConversationToggle = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      const checked = event.target.checked;
-      setStepForm((previous) =>
-        previous ? { ...previous, conversationEnabled: checked } : previous
-      );
-    },
-    []
-  );
-
-  const handleParameterChange = useCallback(
-    (entryId: string, field: "key" | "value") =>
-      (event: ChangeEvent<HTMLInputElement>) => {
-        const value = event.target.value;
-        setStepForm((previous) =>
-          previous
-            ? {
-                ...previous,
-                parameters: previous.parameters.map((entry) =>
-                  entry.id === entryId ? { ...entry, [field]: value } : entry
-                ),
-              }
-            : previous
-        );
-      },
-    []
-  );
-
-  const handleAddParameter = useCallback(() => {
-    setStepForm((previous) =>
-      previous
-        ? {
-            ...previous,
-            parameters: [
-              ...previous.parameters,
-              createKeyValueEntry(
-                "",
-                "",
-                previous.type === "setVariables" ? "string" : undefined
-              ),
-            ],
-          }
-        : previous
-    );
-  }, []);
-
-  const handleRemoveParameter = useCallback((entryId: string) => {
-    setStepForm((previous) => {
-      if (!previous) {
-        return previous;
-      }
-
-      const remaining = previous.parameters.filter(
-        (entry) => entry.id !== entryId
-      );
-
-      return {
-        ...previous,
-        parameters: remaining,
-      };
-    });
-  }, []);
-
-  const handleMoveParameter = useCallback(
-    (entryId: string, direction: "up" | "down") => {
-      setStepForm((previous) => {
-        if (!previous) {
-          return previous;
-        }
-
-        const currentIndex = previous.parameters.findIndex(
-          (entry) => entry.id === entryId
-        );
-
-        if (currentIndex === -1) {
-          return previous;
-        }
-
-        const targetIndex =
-          direction === "up" ? currentIndex - 1 : currentIndex + 1;
-
-        if (targetIndex < 0 || targetIndex >= previous.parameters.length) {
-          return previous;
-        }
-
-        const nextParameters = [...previous.parameters];
-        const [moved] = nextParameters.splice(currentIndex, 1);
-        nextParameters.splice(targetIndex, 0, moved);
-
-        return { ...previous, parameters: nextParameters };
-      });
-    },
-    []
-  );
-
-  const handleParameterDataTypeChange = useCallback(
-    (entryId: string, dataType: WorkflowVariableDataType) => {
-      setStepForm((previous) =>
-        previous
-          ? {
-              ...previous,
-              parameters: previous.parameters.map((entry) =>
-                entry.id === entryId ? { ...entry, dataType } : entry
-              ),
-            }
-          : previous
-      );
-    },
-    []
-  );
-
-  const handleToolToggle = useCallback(
-    (toolId: string) => (event: ChangeEvent<HTMLInputElement>) => {
-      const checked = event.target.checked;
-
-      setStepForm((previous) => {
-        if (!previous) {
-          return previous;
-        }
-
-        const currentTools = new Set(previous.tools ?? []);
-
-        if (checked) {
-          currentTools.add(toolId);
-        } else {
-          currentTools.delete(toolId);
-        }
-
-        return {
-          ...previous,
-          tools: Array.from(currentTools),
-        };
-      });
-    },
-    []
-  );
+  const openers = useStepDialogOpeners({
+    draftDocument,
+    activeWorkflowId,
+    agent,
+    setStepFormState,
+    setStepFormError,
+    setStepOriginalName,
+    openDialog,
+  });
 
   const handleSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
 
-      if (!stepForm || !draftDocument || !activeWorkflowId) {
+      if (!stepForm) {
         setStepFormError("Unable to update step — missing context.");
         return;
       }
 
-      const trimmedName = stepForm.name.trim();
-      const stepType = stepForm.type ?? DEFAULT_STEP_TYPE;
+      const result = persistStepWithValidation({
+        draftDocument,
+        activeWorkflowId,
+        mode,
+        stepForm,
+        stepOriginalName,
+      });
 
-      if (!trimmedName) {
-        setStepFormError("Step name is required.");
+      if (!result.success) {
+        setStepFormError(result.error ?? "Unable to update step.");
         return;
       }
-
-      const parameters = recordFromEntries(stepForm.parameters);
-      const variableTypes = variableTypesFromEntries(stepForm.parameters);
-      const conversation = stepForm.conversationEnabled
-        ? { enabled: true }
-        : undefined;
-      const originalName = stepOriginalName ?? trimmedName;
-      const uniqueTools = Array.from(new Set(stepForm.tools ?? [])).filter(
-        (toolId) => toolId.trim().length > 0
-      );
-
-      if (mode === "create") {
-        const duplicate = draftDocument.agents
-          .find((candidate) => candidate.id === activeWorkflowId)
-          ?.steps.some((step) => step.name === trimmedName);
-
-        if (duplicate) {
-          setStepFormError(
-            "A step with this name already exists. Choose a different name or edit the existing step."
-          );
-          return;
-        }
-      }
-
-      applyDocumentUpdate((draft) => {
-        const agent = draft.agents.find(
-          (candidate) => candidate.id === activeWorkflowId
-        );
-
-        if (!agent) {
-          return draft;
-        }
-
-        const existingIndex = agent.steps.findIndex(
-          (step) => step.name === originalName
-        );
-        const previousStep =
-          existingIndex >= 0 ? agent.steps[existingIndex] : undefined;
-        const outcomes = previousStep?.outcomes ?? [];
-
-        const updatedStep: AgentStepDefinition = {
-          name: trimmedName,
-          type: stepType,
-          parameters,
-          conversation,
-          outcomes: outcomes ?? [],
-        };
-
-        if (!conversation) {
-          delete (updatedStep as Partial<AgentStepDefinition>).conversation;
-        }
-
-        if (Object.keys(variableTypes).length > 0) {
-          updatedStep.variableTypes = variableTypes;
-        } else {
-          delete (updatedStep as Partial<AgentStepDefinition>).variableTypes;
-        }
-
-        if (uniqueTools.length > 0) {
-          updatedStep.tools = uniqueTools;
-        } else {
-          delete (updatedStep as Partial<AgentStepDefinition>).tools;
-        }
-
-        if (existingIndex >= 0) {
-          agent.steps[existingIndex] = updatedStep;
-        } else {
-          agent.steps.push({
-            ...updatedStep,
-            outcomes: [],
-            tools: updatedStep.tools,
-          });
-        }
-
-        if (originalName !== trimmedName) {
-          renameStepReferences(agent, originalName, trimmedName);
-        }
-
-        return draft;
-      });
 
       setStepFormError(null);
       reset();
@@ -633,48 +149,22 @@ export function useStepDialog({
       activeWorkflowId,
       stepOriginalName,
       mode,
-      applyDocumentUpdate,
+      persistStepWithValidation,
       reset,
     ]
   );
 
   const handleDelete = useCallback(() => {
-    if (!draftDocument || !activeWorkflowId || !stepOriginalName) {
-      setStepFormError("Unable to delete step — missing context.");
+    const result = deleteStepWithValidation({
+      draftDocument,
+      activeWorkflowId,
+      stepOriginalName,
+    });
+
+    if (!result.success) {
+      setStepFormError(result.error ?? "Unable to delete step.");
       return;
     }
-
-    applyDocumentUpdate((draft) => {
-      const agent = draft.agents.find(
-        (candidate) => candidate.id === activeWorkflowId
-      );
-
-      if (!agent) {
-        return draft;
-      }
-
-      const index = agent.steps.findIndex(
-        (step) => step.name === stepOriginalName
-      );
-
-      if (index === -1) {
-        return draft;
-      }
-
-      const removedWasStart = agent.steps[index]?.isStartStep;
-
-      agent.steps.splice(index, 1);
-
-      if (removedWasStart && agent.steps.length > 0) {
-        const fallback = agent.steps.find((step) => step.isStartStep);
-
-        if (!fallback) {
-          agent.steps[0].isStartStep = true;
-        }
-      }
-
-      return draft;
-    });
 
     setStepFormError(null);
     reset();
@@ -682,27 +172,13 @@ export function useStepDialog({
     draftDocument,
     activeWorkflowId,
     stepOriginalName,
-    applyDocumentUpdate,
+    deleteStepWithValidation,
     reset,
   ]);
 
-  const title = useMemo(() => {
-    if (mode === "create") {
-      return "Create Step";
-    }
-
-    if (!dialogTarget) {
-      return "Configure Step";
-    }
-
-    return `Configure Step “${
-      dialogTarget.data.stepName ?? dialogTarget.data.label
-    }”`;
-  }, [mode, dialogTarget]);
-
   return {
     dialogProps: {
-      open: isOpen,
+      open,
       mode,
       title,
       stepForm,
@@ -723,12 +199,8 @@ export function useStepDialog({
       onDelete: mode === "edit" ? handleDelete : undefined,
     },
     title,
-    open: isOpen,
-    openForEditing,
-    openForCreation,
-    openForEchoCreation,
-    openForVariableCreation,
-    openForResetCreation,
+    open,
+    openers,
     reset,
   };
 }

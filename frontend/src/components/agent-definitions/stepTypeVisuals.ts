@@ -1,7 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  Bot,
   Megaphone,
-  MessageSquare,
   RefreshCcw,
   Variable as VariableIcon,
 } from "lucide-react";
@@ -28,7 +28,7 @@ export const STEP_TYPE_ORDER: StepType[] = [
 export const STEP_TYPE_VISUALS: Record<StepType, StepTypeVisualConfig> = {
   agent: {
     type: "agent",
-    icon: MessageSquare,
+    icon: Bot,
     label: "Agent",
     toolboxLabel: "Agent Step",
     nodeClass: "border-sky-200 bg-sky-50 text-sky-900",
@@ -66,7 +66,7 @@ export const STEP_TYPE_VISUALS: Record<StepType, StepTypeVisualConfig> = {
 
 export const DEFAULT_STEP_VISUAL: StepTypeVisualConfig = {
   type: "agent",
-  icon: MessageSquare,
+  icon: Bot,
   label: "Step",
   toolboxLabel: "Step",
   nodeClass: "border-border bg-card text-foreground",
