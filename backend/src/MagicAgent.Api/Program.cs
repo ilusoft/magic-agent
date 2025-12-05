@@ -3,10 +3,20 @@ using System.Text.Json.Serialization;
 using MagicAgent.Api.Application.AgentRunner;
 using MagicAgent.Api.Application.Expressions;
 using MagicAgent.Api.Infrastructure.AgentRunner;
+using PRQXCommon.Core;
+using PRQXCommon.Core.Authentication;
+using PRQXCommon.Core.Authorization;
+using PRQXCommon.Core.Configuration;
+using PRQXCommon.Core.Cors;
+using PRQXCommon.Core.Enums;
 
 var builder = WebApplication.CreateBuilder(args);
 
-const string FrontendCorsPolicy = "FrontendCorsPolicy";
+builder.Host.AddPrqxConfiguration(builderType: BuilderType.WebAppBackend,
+    sc =>
+    {
+        sc.AddPrqxOption<AzureAdSettings>();
+    });
 
 builder.Services
     .AddControllers()
@@ -20,17 +30,9 @@ builder.Services
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddHealthChecks();
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy(FrontendCorsPolicy, policy =>
-    {
-        policy.WithOrigins(
-                "http://localhost:5173",
-                "https://localhost:7169")
-            .AllowAnyHeader()
-            .AllowAnyMethod();
-    });
-});
+builder.Services.AddPrqxCors();
+builder.Services.AddPrqxAuthentication();
+builder.Services.AddPrqxAuthorization(BuilderType.WebAppBackend);
 
 builder.Services.Configure<AgentDefinitionsOptions>(builder.Configuration.GetSection("AgentDefinitions"));
 builder.Services.AddSingleton<IAgentDefinitionsProvider, FileAgentDefinitionsProvider>();
@@ -51,7 +53,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.UseCors(FrontendCorsPolicy);
+app.UseCors(CorsConstants.PolicyBackend);
 
 app.MapHealthChecks("/health");
 app.MapControllers();
