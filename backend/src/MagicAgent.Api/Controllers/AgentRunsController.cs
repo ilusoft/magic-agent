@@ -1,8 +1,7 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using MagicAgent.Api.Application.AgentRunner;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using PRQXCommon.Core.Authorization;
 
 namespace MagicAgent.Api.Controllers;
 
@@ -59,6 +58,7 @@ public class AgentRunsController(
         }
     }
 
+    [Authorize(Policy = PrqxPolicies.PolicyAuthOnlyAdmin)]
     [HttpGet("{conversationId}/debug")]
     public async Task<IActionResult> GetConversationDiagnosticsAsync(
         string conversationId,

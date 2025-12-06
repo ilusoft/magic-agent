@@ -1,10 +1,12 @@
-using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using MagicAgent.Api.Application.Expressions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using PRQXCommon.Core.Authorization;
 
 namespace MagicAgent.Api.Controllers;
 
+[Authorize(Policy = PrqxPolicies.PolicyAuthOnlyAdmin)]
 [ApiController]
 [Route("api/workflows/expressions")]
 public sealed class WorkflowExpressionsController(IWorkflowExpressionEvaluator expressionEvaluator) : ControllerBase

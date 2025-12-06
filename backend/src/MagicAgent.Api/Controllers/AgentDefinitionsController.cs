@@ -1,8 +1,11 @@
 using MagicAgent.Api.Application.AgentRunner;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using PRQXCommon.Core.Authorization;
 
 namespace MagicAgent.Api.Controllers;
 
+[Authorize(Policy = PrqxPolicies.PolicyAuthOnlyAdmin)]
 [ApiController]
 [Route("api/agents/definitions")]
 public class AgentDefinitionsController(IAgentDefinitionsProvider definitionsProvider) : ControllerBase

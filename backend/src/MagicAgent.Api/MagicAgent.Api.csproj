@@ -21,7 +21,7 @@
     <PackageReference Include="OpenAI" Version="2.6.0" />
     <PackageReference Include="System.Net.ServerSentEvents" Version="10.0.0-rc.2.25502.107" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.8.0" />
-    <PackageReference Include="PRQXCommon.Core" Version="2.15.12" />
+    <PackageReference Include="PRQXCommon.Core" Version="2.15.21" />
   </ItemGroup>
 
   <ItemGroup>
