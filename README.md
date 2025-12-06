@@ -57,16 +57,14 @@ Each layer only references the one below it (Presentation → Application → In
 
 ## Technology Stack
 
-| Layer            | Technology Choices                                                         |
-| ---------------- | -------------------------------------------------------------------------- |
-| Frontend         | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui, Zustand (state)\*     |
-| Backend API      | ASP.NET Core 8 Web API, MediatR*, FluentValidation*, Serilog/Seq\*         |
-| Agent Runtime    | .NET Agent Framework (official), Polly for resilience\*, BackgroundService |
-| Persistence      | Local JSON files (MVP), optional Postgres/Azure Storage roadmap            |
-| Messaging        | REST + WebSockets/SignalR\*                                                |
-| Tooling / DevOps | pnpm, dotnet CLI, Vitest, xUnit, Playwright*, GitHub Actions*              |
-
-> \*Items marked with an asterisk are recommended defaults and can be refined as requirements evolve.
+| Layer            | Technology Choices                                   |
+| ---------------- | ---------------------------------------------------- |
+| Frontend         | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui. |
+| Backend API      | ASP.NET Core 8 Web API, MediatR\*, FluentValidation. |
+| Agent Runtime    | .NET Agent Framework (official), BackgroundService.  |
+| Persistence      | Local JSON files (MVP), optional SQL Server          |
+| Messaging        | REST + Streaming HTTP SSE                            |
+| Tooling / DevOps | pnpm, dotnet CLI, Vitest, xUnit, GitHub Actions      |
 
 ## Repository Layout (proposed)
 
