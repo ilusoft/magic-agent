@@ -4,30 +4,36 @@ A modular web application for designing, testing, and running AI agent workflows
 
 ## Architecture Overview
 
-```
-+----------------------------+           +---------------------------+
-|   React + Vite SPA (UI)    |<--HTTP--> | ASP.NET Core Web API      |
-|  - Workflow Designer       |           |  - REST endpoints         |
-|  - Run Console & Insights  |           |  - WebSocket/SignalR (*)  |
-+-------------+--------------+           +-----------+---------------+
-              |                                      |
-              | JSON Agent Config                    | Agent Orchestration
-              v                                      v
-+-------------+--------------+           +-----------+---------------+
-|  JSON Configuration Store  |           |  Agent Runtime Service    |
-|  - Agent prompts & tools   |           |  - .NET Agent Framework   |
-|  - Workflow definitions    |           |  - Execution engine       |
-+-------------+--------------+           +-----------+---------------+
-                                                      |
-                                                      v
-                                          +-----------+---------------+
-                                          |  LLM / Tool Providers     |
-                                          |  - OpenAI / Azure OpenAI  |
-                                          |  - Custom tools & APIs    |
-                                          +---------------------------+
-```
+```mermaid
+flowchart LR
+    subgraph Frontend["React + Vite SPA (UI)"]
+        A1["Workflow Designer"]
+        A2["Run Console & Insights"]
+    end
 
-> (\*) Real-time updates may be powered by SignalR once run streaming is implemented.
+    subgraph Backend["ASP.NET Core Web API"]
+        B1["REST endpoints"]
+        B2["Streaming (HTTP SSE)"]
+    end
+
+    subgraph Config["JSON Configuration Store"]
+        C1["Agent prompts & tools"]
+        C2["Workflow definitions"]
+    end
+
+    subgraph Runtime["Agent Runtime Service"]
+        R1[".NET Agent Framework"]
+        R2["Execution engine"]
+    end
+
+    Providers["LLM / Tool Providers\n(OpenAI, Azure OpenAI, custom APIs)"]
+
+    Frontend <--> |HTTP| Backend
+    Frontend --> |JSON agent config| Config
+    Config --> Runtime
+    Backend --> |Agent orchestration| Runtime
+    Runtime --> Providers
+```
 
 ### Core Concepts
 
