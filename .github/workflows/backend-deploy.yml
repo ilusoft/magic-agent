@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   build-and-deploy:
@@ -13,6 +14,7 @@ jobs:
       DOTNET_VERSION: "8.0.x"
       API_PROJECT: "backend/src/MagicAgent.Api/MagicAgent.Api.csproj"
       PUBLISH_DIR: "backend/src/MagicAgent.Api/publish"
+      PACKAGE_PATH: "backend/src/MagicAgent.Api/app.zip"
 
     steps:
       - name: Checkout
@@ -24,7 +26,11 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore dependencies
-        run: dotnet restore ${{ env.API_PROJECT }}
+        env:
+          NG_PRQX_PWD: ${{ secrets.PRQX_PACKAGES_READ_TOKEN }}
+          NG_PRQX_USER: ${{ secrets.PRQX_PACKAGES_READ_USER }}             
+        run: |
+          dotnet restore ${{ env.API_PROJECT }}
 
       - name: Build
         run: dotnet build ${{ env.API_PROJECT }} --configuration Release --no-restore
@@ -35,9 +41,24 @@ jobs:
       - name: Publish
         run: dotnet publish ${{ env.API_PROJECT }} --configuration Release --no-build --output ${{ env.PUBLISH_DIR }}
 
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
         with:
-          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: ${{ env.PUBLISH_DIR }}
+          client-id: ${{ secrets.PRQX_AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.PRQX_AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.PRQX_AZURE_SUBSCRIPTION_ID }}
+
+      - name: Package artifact
+        run: |
+          rm -f ${{ env.PACKAGE_PATH }}
+          cd ${{ env.PUBLISH_DIR }}
+          zip -r ../app.zip .
+
+      - name: Deploy with Azure CLI
+        run: |
+          az webapp deploy \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --name ${{ secrets.AZURE_WEBAPP_NAME }} \
+            --src-path ${{ env.PACKAGE_PATH }} \
+            --type zip \
+            --async false
