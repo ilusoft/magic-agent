@@ -41,10 +41,12 @@ jobs:
       - name: Publish
         run: dotnet publish ${{ env.API_PROJECT }} --configuration Release --no-build --output ${{ env.PUBLISH_DIR }}
 
-      - name: Azure Login (OIDC)
+      - name: Login to Azure
         uses: azure/login@v2
         with:
-          creds: "{ \"clientId\": \"${{ secrets.PRQX_AZURE_CLIENT_ID }}\", \"tenantId\": \"${{ secrets.PRQX_AZURE_TENANT_ID }}\", \"subscriptionId\": \"${{ secrets.PRQX_AZURE_SUBSCRIPTION_ID }}\", \"clientSecret\": \"${{ secrets.PRQX_AZURE_CLIENT_SECRET }}\" }"
+          client-id: ${{ secrets.PRQX_AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.PRQX_AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.PRQX_AZURE_SUBSCRIPTION_ID }}
 
       - name: Package artifact
         run: |
