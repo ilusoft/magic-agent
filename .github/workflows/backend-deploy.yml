@@ -44,13 +44,7 @@ jobs:
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
-          creds: | 
-            "{ 
-               \"clientId\": \"${{ secrets.PRQX_AZURE_CLIENT_ID }}\" 
-               \"tenantId\": \"${{ secrets.PRQX_AZURE_TENANT_ID }}\" 
-               \"subscriptionId\": \"${{ secrets.PRQX_AZURE_SUBSCRIPTION_ID }}\" 
-               \"clientSecret\": \"${{ secrets.PRQX_AZURE_CLIENT_SECRET }}\" 
-            }"
+          creds: "{ \"clientId\": \"${{ secrets.PRQX_AZURE_CLIENT_ID }}\" \"tenantId\": \"${{ secrets.PRQX_AZURE_TENANT_ID }}\" \"subscriptionId\": \"${{ secrets.PRQX_AZURE_SUBSCRIPTION_ID }}\" \"clientSecret\": \"${{ secrets.PRQX_AZURE_CLIENT_SECRET }}\" }"
 
       - name: Package artifact
         run: |
