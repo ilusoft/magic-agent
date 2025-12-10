@@ -15,67 +15,59 @@ using PRQXCommon.Core.Swagger;
 using PRQXCommon.Core.Versioning;
 using Serilog;
 
-try
-{
-    var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateBuilder(args);
+Log.Debug("Starting Bootstrapping!!");
+builder.Host.AddPrqxConfiguration(builderType: BuilderType.WebAppBff,
+    sc =>
+    {
+        sc.AddPrqxOption<AzureAdSettings>();
+        sc.AddPrqxOption<BffSettings>();
+    });
 
-    builder.Host.AddPrqxConfiguration(builderType: BuilderType.WebAppBff,
-        sc =>
+builder.Host.AddPrqxLogging(BuilderType.WebAppBff);
+builder.Services.AddPrqxHealthChecks();
+builder.Services.AddPrqxApiVersioning();
+builder.Services.AddPrqxSwagger("Magic Agent API");
+builder.Services.AddPrqxCors();
+
+builder.Services
+    .AddControllers()
+    .AddJsonOptions(options =>
+    {
+        if (!options.JsonSerializerOptions.Converters.Any(converter => converter is JsonStringEnumConverter))
         {
-            sc.AddPrqxOption<AzureAdSettings>();
-            sc.AddPrqxOption<BffSettings>();
-        });
+            options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+        }
+    });
 
-    builder.Host.AddPrqxLogging(BuilderType.WebAppBff);
-    builder.Services.AddPrqxHealthChecks();
-    builder.Services.AddPrqxApiVersioning();
-    builder.Services.AddPrqxSwagger("Magic Agent API");
-    builder.Services.AddPrqxCors();
+builder.Services.AddPrqxAuthentication();
+builder.Services.AddPrqxAuthorization(BuilderType.WebAppBff);
 
-    builder.Services
-        .AddControllers()
-        .AddJsonOptions(options =>
-        {
-            if (!options.JsonSerializerOptions.Converters.Any(converter => converter is JsonStringEnumConverter))
-            {
-                options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
-            }
-        });
+builder.Services.Configure<AgentDefinitionsOptions>(builder.Configuration.GetSection("AgentDefinitions"));
+builder.Services.AddSingleton<IAgentDefinitionsProvider, FileAgentDefinitionsProvider>();
+builder.Services.AddSingleton<IAgentDefinitionValueResolver, AgentDefinitionConfigurationResolver>();
+builder.Services.AddSingleton<IAgentConversationStore, InMemoryAgentConversationStore>();
+builder.Services.AddSingleton<IAgentDiagnosticsStore, InMemoryAgentDiagnosticsStore>();
+builder.Services.AddSingleton<IAgentRunProgressSink, NoOpAgentRunProgressSink>();
+builder.Services.AddSingleton<IAgentRunner, DefaultAgentRunner>();
+builder.Services.AddWorkflowExpressionServices();
 
-    builder.Services.AddPrqxAuthentication();
-    builder.Services.AddPrqxAuthorization(BuilderType.WebAppBff);
+var app = builder.Build();
 
-    builder.Services.Configure<AgentDefinitionsOptions>(builder.Configuration.GetSection("AgentDefinitions"));
-    builder.Services.AddSingleton<IAgentDefinitionsProvider, FileAgentDefinitionsProvider>();
-    builder.Services.AddSingleton<IAgentDefinitionValueResolver, AgentDefinitionConfigurationResolver>();
-    builder.Services.AddSingleton<IAgentConversationStore, InMemoryAgentConversationStore>();
-    builder.Services.AddSingleton<IAgentDiagnosticsStore, InMemoryAgentDiagnosticsStore>();
-    builder.Services.AddSingleton<IAgentRunProgressSink, NoOpAgentRunProgressSink>();
-    builder.Services.AddSingleton<IAgentRunner, DefaultAgentRunner>();
-    builder.Services.AddWorkflowExpressionServices();
+Log.Debug("Starting Services!!");
 
-    var app = builder.Build();
+app.UsePrqxConfiguration();
+app.UsePrqxExceptionHandler();
+app.UsePrqxHealthChecks();
+app.UsePrqxSwagger();
 
-    app.UsePrqxConfiguration();
-    app.UsePrqxExceptionHandler();
-    app.UsePrqxHealthChecks();
-    app.UsePrqxSwagger();
+app.UseRouting();
+app.UseCors(CorsConstants.PolicyAdmin);
+app.UsePrqxAuthorization();
+app.MapControllers();
 
-    app.UseRouting();
-    app.UseCors(CorsConstants.PolicyAdmin);
-    app.UsePrqxAuthorization();
-    app.MapControllers();
+Log.Debug("App ready to run!!");
 
-    app.Run();
-}
-catch (Exception ex)
-{
-    Log.Fatal(ex, "An error occurred during bootstrap.");
-}
-finally
-{
-    Log.CloseAndFlush();
-    Thread.Sleep(2000);
-}
+app.Run();
 
 public partial class Program;
