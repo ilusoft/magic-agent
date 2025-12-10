@@ -15,60 +15,75 @@ using PRQXCommon.Core.Swagger;
 using PRQXCommon.Core.Versioning;
 using Serilog;
 
-var builder = WebApplication.CreateBuilder(args);
-LoggingExtensions.AddBootstrapLogging();
+Log.Logger = new LoggerConfiguration()
+    .Enrich.FromLogContext()
+    .WriteTo.Console() // Console sink for bootstrap events
+    .CreateBootstrapLogger(); var builder = WebApplication.CreateBuilder(args);
 Log.Information("Starting Bootstrapping!!");
-builder.Host.AddPrqxConfiguration(builderType: BuilderType.WebAppBff,
-    sc =>
-    {
-        sc.AddPrqxOption<AzureAdSettings>();
-        sc.AddPrqxOption<BffSettings>();
-    });
 
-builder.Host.AddPrqxLogging(BuilderType.WebAppBff);
-builder.Services.AddPrqxHealthChecks();
-builder.Services.AddPrqxApiVersioning();
-builder.Services.AddPrqxSwagger("Magic Agent API");
-builder.Services.AddPrqxCors();
-
-builder.Services
-    .AddControllers()
-    .AddJsonOptions(options =>
-    {
-        if (!options.JsonSerializerOptions.Converters.Any(converter => converter is JsonStringEnumConverter))
+try
+{
+    builder.Host.AddPrqxConfiguration(builderType: BuilderType.WebAppBff,
+        sc =>
         {
-            options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
-        }
-    });
+            sc.AddPrqxOption<AzureAdSettings>();
+            sc.AddPrqxOption<BffSettings>();
+        });
 
-builder.Services.AddPrqxAuthentication();
-builder.Services.AddPrqxAuthorization(BuilderType.WebAppBff);
+    builder.Host.AddPrqxLogging(BuilderType.WebAppBff);
+    builder.Services.AddHttpContextAccessor();
+    builder.Services.AddPrqxHealthChecks();
+    builder.Services.AddPrqxApiVersioning();
+    builder.Services.AddPrqxSwagger("Magic Agent API");
+    builder.Services.AddPrqxCors();
 
-builder.Services.Configure<AgentDefinitionsOptions>(builder.Configuration.GetSection("AgentDefinitions"));
-builder.Services.AddSingleton<IAgentDefinitionsProvider, FileAgentDefinitionsProvider>();
-builder.Services.AddSingleton<IAgentDefinitionValueResolver, AgentDefinitionConfigurationResolver>();
-builder.Services.AddSingleton<IAgentConversationStore, InMemoryAgentConversationStore>();
-builder.Services.AddSingleton<IAgentDiagnosticsStore, InMemoryAgentDiagnosticsStore>();
-builder.Services.AddSingleton<IAgentRunProgressSink, NoOpAgentRunProgressSink>();
-builder.Services.AddSingleton<IAgentRunner, DefaultAgentRunner>();
-builder.Services.AddWorkflowExpressionServices();
+    builder.Services
+        .AddControllers()
+        .AddJsonOptions(options =>
+        {
+            if (!options.JsonSerializerOptions.Converters.Any(converter => converter is JsonStringEnumConverter))
+            {
+                options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+            }
+        });
 
-var app = builder.Build();
+    builder.Services.AddPrqxAuthentication();
+    builder.Services.AddPrqxAuthorization(BuilderType.WebAppBff);
 
-Log.Information("Starting Services!!");
+    builder.Services.Configure<AgentDefinitionsOptions>(builder.Configuration.GetSection("AgentDefinitions"));
+    builder.Services.AddSingleton<IAgentDefinitionsProvider, FileAgentDefinitionsProvider>();
+    builder.Services.AddSingleton<IAgentDefinitionValueResolver, AgentDefinitionConfigurationResolver>();
+    builder.Services.AddSingleton<IAgentConversationStore, InMemoryAgentConversationStore>();
+    builder.Services.AddSingleton<IAgentDiagnosticsStore, InMemoryAgentDiagnosticsStore>();
+    builder.Services.AddSingleton<IAgentRunProgressSink, NoOpAgentRunProgressSink>();
+    builder.Services.AddSingleton<IAgentRunner, DefaultAgentRunner>();
+    builder.Services.AddWorkflowExpressionServices();
 
-app.UsePrqxConfiguration();
-app.UsePrqxExceptionHandler();
-app.UsePrqxHealthChecks();
-app.UsePrqxSwagger();
+    var app = builder.Build();
 
-app.UseRouting();
-app.UseCors(CorsConstants.PolicyAdmin);
-app.UsePrqxAuthorization();
-app.MapControllers();
+    Log.Information("Starting Services!!");
 
-Log.Information("App ready to run!!");
+    app.UsePrqxConfiguration();
+    app.UsePrqxExceptionHandler();
+    app.UsePrqxHealthChecks();
+    app.UsePrqxSwagger();
 
-app.Run();
+    app.UseRouting();
+    app.UseCors(CorsConstants.PolicyAdmin);
+    app.UsePrqxAuthorization();
+    app.MapControllers();
+
+    Log.Information("App ready to run!!");
+
+    app.Run();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Application failed to start.");
+}
+finally
+{
+    Log.CloseAndFlush();
+}
 
 public partial class Program;
