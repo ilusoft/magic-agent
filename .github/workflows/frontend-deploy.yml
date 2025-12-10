@@ -60,3 +60,6 @@ jobs:
           app_location: ${{ env.APP_LOCATION }}
           api_location: ""
           output_location: "dist"
+          app_artifact_location: "frontend/dist"
+          skip_app_build: true
+          skip_api_build: true
