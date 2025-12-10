@@ -20,6 +20,13 @@ jobs:
       NODE_VERSION: "20.x"
       APP_LOCATION: "frontend"
       OUTPUT_LOCATION: "frontend/dist"
+      VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+      VITE_MSAL_CLIENT_ID: ${{ vars.VITE_MSAL_CLIENT_ID }}
+      VITE_MSAL_TENANT_NAME: ${{ vars.VITE_MSAL_TENANT_NAME }}
+      VITE_MSAL_POLICY_ID: ${{ vars.VITE_MSAL_POLICY_ID }}
+      VITE_MSAL_REDIRECT_URI: ${{ vars.VITE_MSAL_REDIRECT_URI }}
+      VITE_MSAL_CACHE_LOCATION: ${{ vars.VITE_MSAL_CACHE_LOCATION }}
+      VITE_MSAL_SCOPES: ${{ vars.VITE_MSAL_SCOPES }}
 
     steps:
       - name: Checkout
