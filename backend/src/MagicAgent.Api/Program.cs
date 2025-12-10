@@ -16,7 +16,7 @@ using PRQXCommon.Core.Versioning;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
-Log.Debug("Starting Bootstrapping!!");
+Log.Information("Starting Bootstrapping!!");
 builder.Host.AddPrqxConfiguration(builderType: BuilderType.WebAppBff,
     sc =>
     {
@@ -54,7 +54,7 @@ builder.Services.AddWorkflowExpressionServices();
 
 var app = builder.Build();
 
-Log.Debug("Starting Services!!");
+Log.Information("Starting Services!!");
 
 app.UsePrqxConfiguration();
 app.UsePrqxExceptionHandler();
@@ -66,7 +66,7 @@ app.UseCors(CorsConstants.PolicyAdmin);
 app.UsePrqxAuthorization();
 app.MapControllers();
 
-Log.Debug("App ready to run!!");
+Log.Information("App ready to run!!");
 
 app.Run();
 
