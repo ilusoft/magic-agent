@@ -1,0 +1,91 @@
+name: Build Frontend Artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "GitHub Environment to deploy to"
+        required: true
+        default: "production"
+  workflow_call:
+    inputs:
+      environment:
+        description: "GitHub Environment to build for"
+        required: true
+        type: string
+    outputs:
+      artifact_run_id:
+        description: "Run ID that published the frontend-dist artifact"
+        value: ${{ jobs.build-and-deploy.outputs.artifact_run_id }}
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-deploy:
+    environment:
+      name: ${{ inputs.environment || github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_run_id: ${{ steps.capture-run.outputs.run_id }}
+    env:
+      TARGET_ENVIRONMENT: ${{ inputs.environment || github.event.inputs.environment }}
+      NODE_VERSION: "20.x"
+      APP_LOCATION: "frontend"
+      OUTPUT_LOCATION: "frontend/dist"
+      VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+      VITE_MSAL_CLIENT_ID: ${{ vars.VITE_MSAL_CLIENT_ID }}
+      VITE_MSAL_TENANT_NAME: ${{ vars.VITE_MSAL_TENANT_NAME }}
+      VITE_MSAL_POLICY_ID: ${{ vars.VITE_MSAL_POLICY_ID }}
+      VITE_MSAL_REDIRECT_URI: ${{ vars.VITE_MSAL_REDIRECT_URI }}
+      VITE_MSAL_CACHE_LOCATION: ${{ vars.VITE_MSAL_CACHE_LOCATION }}
+      VITE_MSAL_SCOPES: ${{ vars.VITE_MSAL_SCOPES }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install
+        working-directory: frontend
+
+      - name: Build
+        run: pnpm build
+        working-directory: frontend
+
+      - name: Package dist artifact
+        run: |
+          rm -rf frontend-dist-artifact
+          mkdir -p frontend-dist-artifact
+          cp -R frontend/dist/. frontend-dist-artifact/
+          cat <<'EOF' > frontend-dist-artifact/deploy-metadata.json
+          {
+            "environment": "${{ env.TARGET_ENVIRONMENT }}",
+            "source_run_id": "${{ github.run_id }}"
+          }
+          EOF
+          cd frontend-dist-artifact
+          zip -r ../frontend-dist.zip .
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend-dist.zip
+          if-no-files-found: error
+
+      - name: Capture run metadata
+        id: capture-run
+        run: echo "run_id=${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"

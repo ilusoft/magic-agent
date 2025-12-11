@@ -1,0 +1,35 @@
+name: Build and Deploy Frontend
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "GitHub Environment to build and deploy"
+        required: true
+        default: "production"
+      artifact_name:
+        description: "Override artifact name (optional)"
+        required: false
+        default: "frontend-dist"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    name: Build Artifact
+    uses: ./.github/workflows/utilities/frontend-build-package.yml
+    with:
+      environment: ${{ github.event.inputs.environment }}
+    secrets: inherit
+
+  deploy:
+    name: Deploy Artifact
+    needs: build
+    uses: ./.github/workflows/utilities/frontend-deploy-artifact.yml
+    with:
+      environment: ${{ github.event.inputs.environment }}
+      artifact_run_id: ${{ needs.build.outputs.artifact_run_id }}
+      artifact_name: ${{ github.event.inputs.artifact_name }}
+    secrets: inherit
