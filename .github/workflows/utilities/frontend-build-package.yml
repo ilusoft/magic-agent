@@ -13,7 +13,8 @@ on:
         value: ${{ jobs.build-and-deploy.outputs.artifact_run_id }}
 
 permissions:
-  contents: read
+  contents: write
+  actions: write
 
 jobs:
   build-and-deploy:

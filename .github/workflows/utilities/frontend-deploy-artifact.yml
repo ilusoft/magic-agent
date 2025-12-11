@@ -18,8 +18,8 @@ on:
         type: string
 
 permissions:
-  contents: read
-  actions: read
+  contents: write
+  actions: write
 
 jobs:
   deploy:
