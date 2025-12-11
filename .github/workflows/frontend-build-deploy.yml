@@ -28,7 +28,7 @@ jobs:
   deploy:
     name: Deploy Artifact
     needs: build
-    uses: ./.github/workflows/utilities/frontend-deploy-artifact.yml
+    uses: ./.github/workflows/frontend-deploy-artifact.yml
     with:
       environment: ${{ github.event.inputs.environment }}
       artifact_run_id: ${{ needs.build.outputs.artifact_run_id }}
