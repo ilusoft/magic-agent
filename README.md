@@ -376,6 +376,37 @@ VITE_API_BASE_URL=https://localhost:5001
 
 The SPA will proxy API calls to `VITE_API_BASE_URL`. Configure CORS in the backend for the dev origin (`http://localhost:5173`).
 
+## API Authentication Modes
+
+The frontend talks to two classes of endpoints:
+
+| Endpoint                  | Example                                                                    | Auth strategy                                                       |
+| ------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Protected management APIs | `/api/agents/definitions`, `/api/workflows/helpers`, diagnostics endpoints | MSAL-issued ID token automatically attached by `useAuthorizedFetch` |
+| Anonymous run endpoint    | `/api/agents/{id}/runs` (including SSE streaming variant)                  | **No MSAL token** – user-supplied tool token is forwarded unchanged |
+
+`useAuthorizedFetch` now accepts `includeAuth` (default `true`). All protected calls continue to do:
+
+```ts
+await authorizedFetch(`${API}/api/agents/definitions`);
+```
+
+To invoke the run endpoint, disable MSAL auth and provide the tool header that should flow to MCP tools:
+
+```ts
+await authorizedFetch(`${API}/api/agents/${agentId}/runs`, {
+  method: "POST",
+  includeAuth: false,
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: userProvidedToken,
+  },
+  body: JSON.stringify({ input, conversationId }),
+});
+```
+
+This keeps the RUN endpoint aligned with backend expectations (unauthenticated but requiring a manually entered token) while preserving the stricter policy everywhere else.
+
 ## Testing & Quality Gates
 
 - **Backend**: xUnit + FluentAssertions + WebApplicationFactory for integration tests. `dotnet test backend/tests/MagicAgent.Api.Tests`.
