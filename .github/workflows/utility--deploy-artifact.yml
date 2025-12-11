@@ -1,4 +1,4 @@
-name: Deploy Frontend Artifact
+name: UTILITY /Deploy Frontend Artifact
 
 on:
   workflow_call:

@@ -1,4 +1,4 @@
-name: Build Frontend Artifact
+name: UTILITY / Build Frontend Artifact
 
 on:
   workflow_call:
