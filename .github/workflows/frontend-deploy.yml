@@ -52,12 +52,18 @@ jobs:
         run: pnpm build
         working-directory: frontend
 
+      - name: Stage static bundle
+        run: |
+          rm -rf staged-frontend
+          mkdir -p staged-frontend
+          cp -R frontend/dist/. staged-frontend/
+
       - name: Deploy to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
         with:
           action: "upload"
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
-          app_location: "frontend/dist"
+          app_location: "staged-frontend"
           api_location: ""
           output_location: ""
           skip_app_build: true
