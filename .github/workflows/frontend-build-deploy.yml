@@ -20,7 +20,7 @@ permissions:
 jobs:
   build:
     name: Build Artifact
-    uses: ./.github/workflows/utilities/frontend-build-package.yml
+    uses: ./.github/workflows/frontend-build-package.yml
     with:
       environment: ${{ github.event.inputs.environment }}
     secrets: inherit
