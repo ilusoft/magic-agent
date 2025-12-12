@@ -291,11 +291,10 @@ export function AgentRunnerView({
 
     try {
       const runAgentWithoutStreaming = async () => {
-        const response = await authorizedFetch(
+        const response = await fetch(
           `${apiBaseUrl}/api/agents/${selectedAgentId}/runs`,
           {
             method: "POST",
-            includeAuth: false,
             headers: baseHeaders,
             body: requestBody,
           }
@@ -337,11 +336,10 @@ export function AgentRunnerView({
           Accept: "text/event-stream",
         };
 
-        const response = await authorizedFetch(
+        const response = await fetch(
           `${apiBaseUrl}/api/agents/${selectedAgentId}/runs`,
           {
             method: "POST",
-            includeAuth: false,
             headers: streamingHeaders,
             body: requestBody,
           }
