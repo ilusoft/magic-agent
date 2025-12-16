@@ -147,7 +147,7 @@ public sealed class DefaultAgentRunner(
                 break;
             }
 
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "[Workflow] Agent {AgentId} starting step {StepName} (type: {StepType}, iteration: {Iteration}).",
                 definition.Id,
                 stepDefinition.Name,
@@ -268,17 +268,6 @@ public sealed class DefaultAgentRunner(
                 enrichedResult,
                 elapsed,
                 cancellationToken).ConfigureAwait(false);
-
-            _logger.LogInformation(
-                "[Workflow] Agent {AgentId} completed step {StepName} in {ElapsedMs} ms. Outcome: {Outcome}, Next: {NextStep}, EndWorkflow: {EndWorkflow}, ToolError: {ToolErrorDetected}.",
-                definition.Id,
-                enrichedResult.Name,
-                stepStopwatch.ElapsedMilliseconds,
-                enrichedResult.Outcome ?? "(none)",
-                enrichedResult.EndWorkflow ? "(end)" : enrichedResult.NextStep ?? "(unspecified)",
-                enrichedResult.EndWorkflow,
-                enrichedResult.ToolErrorDetected);
-
             if (outcomeResolution.EndWorkflow)
             {
                 currentStepName = null;
@@ -691,9 +680,12 @@ public sealed class DefaultAgentRunner(
 
             userTranscriptMessage = new AgentMessage("user", userMessage, DateTimeOffset.UtcNow);
 
+            var agentRunStopwatch = Stopwatch.StartNew();
             var runResponse = await agent.RunAsync(requestMessages, agentThread, options: null, cancellationToken: cancellationToken);
+            agentRunStopwatch.Stop();
 
             var toolAnalysis = ToolInvocationUtilities.Analyze(runResponse);
+            LogToolInvocations(definition.Id, step, toolAnalysis, agentRunStopwatch.Elapsed);
 
 
             JsonElement? serializedThread = null;
@@ -826,4 +818,48 @@ public sealed class DefaultAgentRunner(
         return runResult;
     }
 
+    private void LogToolInvocations(
+        string agentId,
+        AgentStepDefinition step,
+        ToolInvocationUtilities.ToolInvocationAnalysis analysis,
+        TimeSpan elapsed)
+    {
+        if (analysis.ToolCalls.Count == 0)
+        {
+            _logger.LogDebug(
+                "Agent {AgentId} step {StepName} completed with no MCP tool invocations in {ElapsedMs} ms.",
+                agentId,
+                step.Name,
+                elapsed.TotalMilliseconds);
+            return;
+        }
+
+        foreach (var call in analysis.ToolCalls)
+        {
+            _logger.LogDebug(
+                "Agent {AgentId} step {StepName} invoked MCP tool {ToolName} (InvocationId={InvocationId}) in {ElapsedMs} ms. Args={Arguments} Result={Result} ErrorMessage={ErrorMessage} ErrorDetails={ErrorDetails} ErrorCode={ErrorCode}",
+                agentId,
+                step.Name,
+                call.ToolName ?? "(unknown)",
+                call.InvocationId ?? "(none)",
+                elapsed.TotalMilliseconds,
+                TruncateForLog(call.ArgumentsJson),
+                TruncateForLog(call.Result),
+                call.ErrorMessage ?? "(none)",
+                TruncateForLog(call.ErrorDetails),
+                call.ErrorCode ?? "(none)");
+        }
+    }
+
+    private static string TruncateForLog(string? value, int maxLength = 500)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "(empty)";
+        }
+
+        return value.Length <= maxLength
+            ? value
+            : $"{value[..maxLength]}...(+{value.Length - maxLength} chars)";
+    }
 }
