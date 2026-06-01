@@ -66,7 +66,7 @@ Each layer only references the one below it (Presentation → Application → In
 | Messaging        | REST + Streaming HTTP SSE                            |
 | Tooling / DevOps | pnpm, dotnet CLI, Vitest, xUnit, GitHub Actions      |
 
-## Repository Layout (proposed)
+## Repository Layout
 
 ```
 magic-agent/
@@ -201,34 +201,34 @@ Agent behavior is driven by JSON definitions persisted under `configs/agents`. A
       "provider": "azure-openai",
       "model": "gpt-4o",
       "apiKeySecret": "AZURE_OPENAI_KEY",
-      "endpoint": "https://api.openai.azure.com/..."
+      "endpoint": "https://api.openai.azure.com/...",
     },
     "systemPrompt": "You are a helpful code reviewer...",
     "tools": [
       {
         "type": "http",
         "name": "issue-tracker",
-        "baseUrl": "https://jira.example.com"
-      }
-    ]
+        "baseUrl": "https://jira.example.com",
+      },
+    ],
   },
   "workflow": {
     "steps": [
       {
         "id": "ingest-pr",
         "type": "input",
-        "description": "Load pull request diff"
+        "description": "Load pull request diff",
       },
       { "id": "analyze", "type": "agent-step", "agent": "code-reviewer" },
-      { "id": "summarize", "type": "agent-step", "agent": "summarizer" }
+      { "id": "summarize", "type": "agent-step", "agent": "summarizer" },
     ],
-    "outputs": [{ "id": "report", "type": "markdown" }]
+    "outputs": [{ "id": "report", "type": "markdown" }],
   },
   "runtime": {
     "maxIterations": 8,
     "timeoutSeconds": 120,
-    "retryPolicy": { "maxRetries": 2 }
-  }
+    "retryPolicy": { "maxRetries": 2 },
+  },
 }
 ```
 
@@ -251,17 +251,17 @@ The agent runtime can connect to [Model Context Protocol (MCP)](https://modelcon
       "description": "Answers questions using internal documentation.",
       "defaultParameters": {
         "endpoint": "https://my-azure-openai-host.openai.azure.com/",
-        "deployment": "gpt-4o"
+        "deployment": "gpt-4o",
       },
       "steps": [
         {
           "name": "chat",
           "type": "chat",
           "parameters": {
-            "systemPrompt": "You are a helpful support assistant. Use tools when needed."
+            "systemPrompt": "You are a helpful support assistant. Use tools when needed.",
           },
-          "conversation": { "enabled": true }
-        }
+          "conversation": { "enabled": true },
+        },
       ],
       "tools": [
         {
@@ -272,7 +272,7 @@ The agent runtime can connect to [Model Context Protocol (MCP)](https://modelcon
           "serverUrl": "https://mcp.example.com/api",
           "protocol": "sse",
           "headers": {
-            "Authorization": "Bearer ${INTERNAL_DOCS_TOKEN}"
+            "Authorization": "Bearer ${INTERNAL_DOCS_TOKEN}",
           },
           "allowedTools": ["search", "get_article"],
           "actions": [
@@ -280,14 +280,14 @@ The agent runtime can connect to [Model Context Protocol (MCP)](https://modelcon
               "name": "doc-search",
               "description": "Search the documentation for a topic",
               "parameters": {
-                "tool": "search"
-              }
-            }
-          ]
-        }
-      ]
-    }
-  ]
+                "tool": "search",
+              },
+            },
+          ],
+        },
+      ],
+    },
+  ],
 }
 ```
 
@@ -339,21 +339,21 @@ Create `backend/src/MagicAgent.Api/appsettings.Development.json` (or use Secret 
   "Logging": {
     "LogLevel": {
       "Default": "Information",
-      "Microsoft": "Warning"
-    }
+      "Microsoft": "Warning",
+    },
   },
   "AgentRuntime": {
-    "ConfigsPath": "../../../../configs/agents"
+    "ConfigsPath": "../../../../configs/agents",
   },
   "LLM": {
     "Providers": {
       "AzureOpenAi": {
         "Endpoint": "https://api.openai.azure.com/...",
         "ApiKey": "${AZURE_OPENAI_KEY}",
-        "Deployment": "gpt-4o"
-      }
-    }
-  }
+        "Deployment": "gpt-4o",
+      },
+    },
+  },
 }
 ```
 
