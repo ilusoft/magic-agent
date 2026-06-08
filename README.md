@@ -1,6 +1,6 @@
 # Magic Agent Workflow Studio
 
-A modular web application for designing, testing, and running AI agent workflows. The stack combines a .NET backend that orchestrates agent executions using the .NET Agent Framework with a modern React + TypeScript SPA powered by Vite, Tailwind CSS, and shadcn/ui components.
+A modular web application for designing, testing, and running AI agent workflows. The stack combines a modern React + TypeScript SPA powered by Vite, Tailwind CSS, and shadcn/ui components with a choice of backends: a Python/FastAPI backend or a .NET/ASP.NET Core backend, both orchestrating agent executions.
 
 ## Architecture Overview
 
@@ -11,9 +11,18 @@ flowchart LR
         A2["Run Console & Insights"]
     end
 
-    subgraph Backend["ASP.NET Core Web API"]
-        B1["REST endpoints"]
-        B2["Streaming (HTTP SSE)"]
+    subgraph Backends["Backend Options"]
+        direction TB
+        subgraph Python["Python Backend (FastAPI)"]
+            P1["REST endpoints"]
+            P2["Streaming (SSE)"]
+            P3["LangGraph runtime"]
+        end
+        subgraph DotNet[".NET Backend (ASP.NET Core)"]
+            D1["REST endpoints"]
+            D2["Streaming (HTTP SSE)"]
+            D3[".NET Agent Framework"]
+        end
     end
 
     subgraph Config["JSON Configuration Store"]
@@ -21,18 +30,12 @@ flowchart LR
         C2["Workflow definitions"]
     end
 
-    subgraph Runtime["Agent Runtime Service"]
-        R1[".NET Agent Framework"]
-        R2["Execution engine"]
-    end
-
     Providers["LLM / Tool Providers\n(OpenAI, Azure OpenAI, custom APIs)"]
 
-    Frontend <--> |HTTP| Backend
+    Frontend <--> |HTTP| Backends
     Frontend --> |JSON agent config| Config
-    Config --> Runtime
-    Backend --> |Agent orchestration| Runtime
-    Runtime --> Providers
+    Config --> Backends
+    Backends --> Providers
 ```
 
 ### Core Concepts
@@ -57,21 +60,22 @@ Each layer only references the one below it (Presentation → Application → In
 
 ## Technology Stack
 
-| Layer            | Technology Choices                                   |
-| ---------------- | ---------------------------------------------------- |
-| Frontend         | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui. |
-| Backend API      | ASP.NET Core 8 Web API, MediatR\*, FluentValidation. |
-| Agent Runtime    | .NET Agent Framework (official), BackgroundService.  |
-| Persistence      | Local JSON files (MVP), optional SQL Server          |
-| Messaging        | REST + Streaming HTTP SSE                            |
-| Tooling / DevOps | pnpm, dotnet CLI, Vitest, xUnit, GitHub Actions      |
+| Layer            | Technology Choices                                                           |
+| ---------------- | ---------------------------------------------------------------------------- |
+| Frontend         | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui.                         |
+| Python Backend   | FastAPI, Pydantic, LangGraph, MCP client, SSE streaming.                      |
+| .NET Backend     | ASP.NET Core 8 Web API, MediatR\*, FluentValidation.                          |
+| Agent Runtime    | LangGraph (Python) / .NET Agent Framework (C#), BackgroundService.            |
+| Persistence      | Local JSON files (MVP), optional SQL Server                                   |
+| Messaging        | REST + Streaming HTTP SSE (both backends)                                     |
+| Tooling / DevOps | pnpm, dotnet CLI, Vitest, xUnit, pytest, ruff, GitHub Actions                 |
 
 ## Repository Layout
 
 ```
 magic-agent/
 ├── README.md
-├── backend/
+├── backend/                          # .NET Backend (ASP.NET Core)
 │   ├── src/
 │   │   └── MagicAgent.Api/
 │   │       ├── Controllers/
@@ -81,6 +85,18 @@ magic-agent/
 │   │       └── MagicAgent.Api.csproj
 │   └── tests/
 │       └── MagicAgent.Api.Tests/
+├── backend-py/                       # Python Backend (FastAPI)
+│   ├── src/
+│   │   ├── main.py                  # FastAPI entry point
+│   │   ├── config.py                # Pydantic settings
+│   │   ├── api/                     # REST API layer
+│   │   ├── application/             # Use case orchestration
+│   │   ├── infrastructure/          # External concerns
+│   │   ├── agent_runtime/           # LangGraph integration
+│   │   └── lib/                     # Shared utilities
+│   ├── tests/
+│   ├── pyproject.toml
+│   └── Dockerfile
 ├── frontend/
 │   ├── src/
 │   │   ├── app/                        # routing, layout, providers
@@ -318,6 +334,7 @@ At runtime, the backend instantiates an MCP `HttpClientTransport`, completes the
 
 - Node.js ≥ 20.x and pnpm 9.x (`corepack enable` recommended)
 - .NET SDK 8.0
+- Python 3.10+ (for Python backend)
 - Optional: Docker Desktop (for future containerized services)
 - Recommended IDEs: VS Code with C# Dev Kit and Tailwind IntelliSense
 
@@ -328,11 +345,15 @@ pnpm install --dir frontend
 pnpm dlx shadcn-ui@latest init --dir frontend  # one-time component registry setup
 
 dotnet restore backend/src/MagicAgent.Api/MagicAgent.Api.csproj
+
+# Python backend (choose one or both)
+pip install -e backend-py              # core dependencies
+pip install -e "backend-py[all]"     # with LangGraph, MCP, SSE support
 ```
 
 ### Environment Variables
 
-Create `backend/src/MagicAgent.Api/appsettings.Development.json` (or use Secret Manager):
+**.NET Backend**: Create `backend/src/MagicAgent.Api/appsettings.Development.json` (or use Secret Manager):
 
 ```jsonc
 {
@@ -357,6 +378,20 @@ Create `backend/src/MagicAgent.Api/appsettings.Development.json` (or use Secret 
 }
 ```
 
+**Python Backend**: Copy `backend-py/.env.example` to `backend-py/.env`:
+
+```bash
+AGENT_RUNTIME_CONFIGS_PATH=../../configs/agents
+LLM_PROVIDER=azure-openai
+LLM_ENDPOINT=https://your-resource.openai.azure.com
+LLM_API_KEY=${AZURE_OPENAI_KEY}
+LLM_DEPLOYMENT=gpt-4o
+MAX_ITERATIONS=50
+DEFAULT_TIMEOUT_SECONDS=120
+CORS_ORIGINS=http://localhost:5173
+LOG_LEVEL=INFO
+```
+
 For the frontend, add `.env.local` under `frontend/`:
 
 ```
@@ -365,11 +400,16 @@ VITE_API_BASE_URL=https://localhost:5001
 
 ## Running the Stack (Development)
 
-1. **Backend**
+1. **.NET Backend**
    ```bash
    dotnet watch run --project backend/src/MagicAgent.Api/MagicAgent.Api.csproj
    ```
-2. **Frontend**
+2. **Python Backend**
+   ```bash
+   cd backend-py
+   uvicorn src.main:app --reload --port 8000
+   ```
+3. **Frontend**
    ```bash
    pnpm --dir frontend dev
    ```
@@ -410,6 +450,7 @@ This keeps the RUN endpoint aligned with backend expectations (unauthenticated b
 ## Testing & Quality Gates
 
 - **Backend**: xUnit + FluentAssertions + WebApplicationFactory for integration tests. `dotnet test backend/tests/MagicAgent.Api.Tests`.
+- **Python Backend**: pytest + Ruff for linting. `pytest` and `ruff check src/` from the `backend-py/` directory.
 - **Frontend**: Vitest + Testing Library + MSW for API mocking. `pnpm --dir frontend test`.
 - **E2E**: Playwright (planned) to validate workflow execution end-to-end.
 - **Static Analysis**: ESLint, Stylelint, TypeScript strict mode, and `dotnet format`/Roslyn analyzers.
