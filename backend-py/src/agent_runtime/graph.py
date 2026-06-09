@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
@@ -44,11 +45,11 @@ def create_agent_graph(
 
     # Add nodes
     graph.add_node("input", input_node)
-    graph.add_node("chat", lambda s: chat_node(s, llm, tools, system_prompt))
+    graph.add_node("chat", partial(chat_node, llm=llm, tools=tools, system_prompt=system_prompt))
     graph.add_node("output", output_node)
 
     if tools:
-        graph.add_node("tools", lambda s: tool_node(s, tools))
+        graph.add_node("tools", partial(tool_node, tools=tools))
 
     # Define edges
     graph.add_edge(START, "input")
@@ -123,7 +124,7 @@ def create_simple_chat_graph(
     graph = StateGraph(AgentState)
 
     graph.add_node("input", input_node)
-    graph.add_node("chat", lambda s: chat_node(s, llm, None, system_prompt))
+    graph.add_node("chat", partial(chat_node, llm=llm, tools=None, system_prompt=system_prompt))
     graph.add_node("output", output_node)
 
     graph.add_edge(START, "input")
