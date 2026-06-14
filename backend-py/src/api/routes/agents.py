@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException
+from starlette import status
 
-from src.application.agents.schemas import AgentDefinition
+from src.application.agents.exceptions import AgentNotFoundError
 from src.application.agents.service import AgentService
-from src.application.agents.exceptions import AgentNotFoundError, AgentValidationError
 from src.config import get_settings
 from src.infrastructure.persistence.file_provider import FileAgentDefinitionsProvider
 
@@ -24,48 +23,36 @@ def get_agent_service() -> AgentService:
 
 
 @router.get("/definitions")
-async def list_agent_definitions() -> list[dict[str, Any]]:
-    """List all agent definitions.
+async def get_agent_definitions_document() -> dict[str, Any]:
+    """Get the full agent definitions document.
+
+    Returns the entire contents of agents.json with all metadata
+    (agents array, viewLayout, streaming config, etc.) preserved.
 
     Returns:
-        List of agent definition dicts
+        Full agent definitions document
     """
     service = get_agent_service()
-    agents = await service.list_agents()
-    return [a.model_dump() for a in agents]
+    return await service.get_full_document()
 
 
 @router.put("/definitions")
-async def upsert_agent_definition(
-    agent_id: str | None = None,
-    definition: AgentDefinition | None = None,
+async def save_agent_definitions_document(
+    document: dict[str, Any],
 ) -> dict[str, Any]:
-    """Create or update an agent definition.
+    """Save the full agent definitions document.
+
+    Accepts the complete document structure (with agents array,
+    viewLayout, streaming config, etc.) and writes it to agents.json.
 
     Args:
-        agent_id: Optional agent ID (uses definition.name if not provided)
-        definition: Agent definition
+        document: Full agent definitions document
 
     Returns:
-        The saved agent definition
+        The saved document
     """
-    if not definition:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Definition is required",
-        )
-
     service = get_agent_service()
-    agent_id = agent_id or definition.name
-
-    try:
-        result = await service.upsert_agent(agent_id, definition)
-        return result.model_dump()
-    except AgentValidationError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
+    return await service.save_full_document(document)
 
 
 @router.get("/{agent_id}")

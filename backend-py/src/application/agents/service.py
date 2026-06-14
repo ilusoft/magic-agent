@@ -56,6 +56,17 @@ class AgentService:
 
         return result
 
+    async def get_full_document(self) -> dict[str, Any]:
+        """Get the full agent definitions document.
+
+        Returns the raw document with all metadata preserved
+        (agents array, viewLayout, streaming config, etc.).
+
+        Returns:
+            Full agent definitions document
+        """
+        return await self._provider.get_full_document()
+
     async def upsert_agent(
         self, agent_id: str, definition: AgentDefinition
     ) -> AgentDefinition:
@@ -77,6 +88,17 @@ class AgentService:
         # Save
         await self._provider.save_agent(agent_id, data)
         return definition
+
+    async def save_full_document(self, document: dict[str, Any]) -> dict[str, Any]:
+        """Save the full agent definitions document.
+
+        Args:
+            document: Full agent definitions document with agents array
+
+        Returns:
+            The saved document
+        """
+        return await self._provider.save_full_document(document)
 
     async def delete_agent(self, agent_id: str) -> None:
         """Delete an agent definition.

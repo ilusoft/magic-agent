@@ -109,6 +109,23 @@ class FileAgentDefinitionsProvider:
 
         return agents
 
+    async def get_full_document(self) -> dict[str, Any]:
+        """Load the full agent definitions document.
+
+        Returns the entire contents of agents.json (or equivalent)
+        with all metadata preserved.
+
+        Returns:
+            Full agent definitions document dict
+        """
+        multi_agent_file = self._configs_path / "agents.json"
+        if multi_agent_file.exists():
+            return await self._load_file(multi_agent_file, "agents")
+
+        # Fallback: return structure with list_agents result
+        agents = await self.list_agents()
+        return {"agents": agents}
+
     async def save_agent(
         self, agent_id: str, definition: dict[str, Any]
     ) -> dict[str, Any]:
@@ -129,6 +146,31 @@ class FileAgentDefinitionsProvider:
 
         self._logger.info("agent_saved", agent_id=agent_id, path=str(agent_file))
         return definition
+
+    async def save_full_document(self, document: dict[str, Any]) -> dict[str, Any]:
+        """Save the full agent definitions document.
+
+        Writes the entire document (including agents array, viewLayout,
+        streaming config, etc.) to agents.json.
+
+        Args:
+            document: The full agent definitions document
+
+        Returns:
+            The saved document
+        """
+        multi_agent_file = self._configs_path / "agents.json"
+        multi_agent_file.parent.mkdir(parents=True, exist_ok=True)
+
+        await self._write_file(multi_agent_file, document)
+        self._cache["agents"] = document
+
+        self._logger.info(
+            "full_document_saved",
+            path=str(multi_agent_file),
+            agent_count=len(document.get("agents", [])),
+        )
+        return document
 
     async def delete_agent(self, agent_id: str) -> bool:
         """Delete an agent definition file.

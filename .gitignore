@@ -17,3 +17,5 @@ backend-py/.mypy_cache
 backend-py/.pytest_cache
 **/__pycache__/
 
+# Python environments
+backend-py/.env

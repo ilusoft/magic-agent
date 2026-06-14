@@ -22,6 +22,22 @@
       "type": "coreclr",
       "request": "attach",
       "processId": "${command:dotrush.pickProcess}"
+    },
+    {
+      "name": "Python: Current File",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Python: Debug Main App",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend-py/src/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true
     }
   ]
 }

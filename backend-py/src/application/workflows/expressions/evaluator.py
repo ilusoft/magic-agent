@@ -116,6 +116,10 @@ class WorkflowExpressionEvaluator:
             case "lastOutput":
                 value = self._context.last_output
                 remaining = path
+            case "step_outputs":
+                # Access step_outputs.<step_id>.output
+                value = self._context.step_outputs
+                remaining = path
             case _:
                 value = self._context.get_variable(root)
                 remaining = path

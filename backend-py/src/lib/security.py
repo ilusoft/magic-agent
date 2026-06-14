@@ -8,10 +8,12 @@ from typing import Any
 
 
 def resolve_env_vars(value: str) -> str:
-    """Resolve ${ENV_VAR} placeholders in a string with environment variable values.
+    """Resolve environment variable placeholders in a string.
+
+    Supports both ${ENV_VAR} and {ENV_VAR} syntax.
 
     Args:
-        value: String potentially containing ${ENV_VAR} placeholders
+        value: String potentially containing environment variable placeholders
 
     Returns:
         String with resolved environment variables
@@ -19,11 +21,13 @@ def resolve_env_vars(value: str) -> str:
     Example:
         >>> resolve_env_vars("${AZURE_OPENAI_KEY}")
         "actual-key-value"
+        >>> resolve_env_vars("{AZURE_OPENAI_KEY}")
+        "actual-key-value"
     """
-    pattern = r"\$\{([^}]+)\}"
+    pattern = r"\$\{([^}]+)\}|\{([A-Z_][A-Z0-9_]*)\}"
 
     def replacer(match: re.Match[str]) -> str:
-        env_var = match.group(1)
+        env_var = match.group(1) or match.group(2)
         return os.environ.get(env_var, match.group(0))
 
     return re.sub(pattern, replacer, value)
