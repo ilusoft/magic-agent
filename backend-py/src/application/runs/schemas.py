@@ -1,10 +1,19 @@
-"""Run schemas using Pydantic."""
+"""Run schemas using Pydantic.
+
+The non-streaming JSON response and the diagnostics payload mirror
+the .NET backend's ``AgentWorkflowResult`` /
+``AgentConversationDiagnostics`` shapes (``agentId``/``status``/
+``lastStep``/``conversationId``) so the same SPA client works
+against either backend without branching.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from src.application.agents.run_result import AgentRunResult
 
 
 class RunRequest(BaseModel):
@@ -15,13 +24,71 @@ class RunRequest(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict, description="Run parameters")
 
 
-class RunResponse(BaseModel):
-    """Response from a synchronous agent run."""
+class AgentStepResult(BaseModel):
+    """Lightweight step summary returned in the non-streaming JSON.
 
-    run_id: str = Field(description="Unique run identifier")
-    status: str = Field(description="Run status")
-    output: str | None = Field(default=None, description="Agent output")
-    duration_ms: int | None = Field(default=None, description="Execution duration")
+    Mirrors the subset of ``AgentStepExecutionResult`` that the SPA
+    actually consumes from the non-streaming response.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str
+    type: str
+    output: str = ""
+    outcome: str | None = None
+    next_step: str | None = Field(default=None, alias="nextStep")
+    end_workflow: bool = Field(default=False, alias="endWorkflow")
+
+
+class AgentWorkflowResult(BaseModel):
+    """Non-streaming JSON response.
+
+    Shape matches the .NET backend's ``AgentWorkflowResult`` record
+    (see ``backend/src/MagicAgent.Api/Controllers/AgentRunsController.cs``)
+    so the SPA's ``AgentRunnerView`` can read ``lastStep.output`` and
+    ``conversationId`` regardless of which backend is selected.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    agent_id: str = Field(alias="agentId")
+    status: str
+    last_step: AgentStepResult | None = Field(default=None, alias="lastStep")
+    conversation_id: str | None = Field(default=None, alias="conversationId")
+
+
+class AgentConversationDiagnostics(BaseModel):
+    """Diagnostics payload returned by the debug endpoint.
+
+    Mirrors the .NET ``AgentConversationDiagnostics`` record so the
+    SPA's ``loadDiagnostics`` call can read ``conversationId`` and
+    ``runs[*]`` (``agentId``/``status``/``steps``/``completedAt``)
+    without knowing which backend produced the response.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    conversation_id: str = Field(alias="conversationId")
+    runs: list[AgentRunResult] = Field(
+        default_factory=list,
+        description="All runs recorded for the conversation, in chronological order.",
+    )
+
+    def to_camel_dict(self) -> dict[str, Any]:
+        """Serialise to the camelCase JSON shape the SPA expects.
+
+        ``AgentRunResult.to_dict()`` already returns camelCase, so
+        we only need to remap this model's own fields.
+        """
+        from src.application.agents.run_result import _camel_dict
+
+        return _camel_dict(
+            {
+                "conversation_id": self.conversation_id,
+                "runs": [r.to_dict() for r in self.runs],
+            }
+        )
 
 
 class StepProgressEvent(BaseModel):

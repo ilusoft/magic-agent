@@ -146,7 +146,11 @@ class WorkflowExpressionParser:
 
         # Number
         if token.kind == TokenKind.NUMBER:
-            return NumberNode(float(self._advance().value))
+            raw = self._advance().value
+            as_float = float(raw)
+            if as_float.is_integer() and ("." not in raw) and ("e" not in raw.lower()):
+                return NumberNode(int(as_float))
+            return NumberNode(as_float)
 
         # String
         if token.kind == TokenKind.STRING:

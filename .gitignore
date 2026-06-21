@@ -19,3 +19,5 @@ backend-py/.pytest_cache
 
 # Python environments
 backend-py/.env
+backend-py/.venv/
+.DS_Store

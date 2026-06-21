@@ -11,6 +11,7 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
+from src.config import get_settings
 from src.lib.security import resolve_env_vars
 
 
@@ -22,6 +23,7 @@ class LLMConfig(BaseModel):
     api_key: str | None = None
     endpoint: str | None = None
     deployment: str | None = None
+    api_version: str | None = None
     temperature: float = 0.7
     max_tokens: int | None = None
 
@@ -39,6 +41,7 @@ class LLMFactory:
         api_key: str | None = None,
         endpoint: str | None = None,
         deployment: str | None = None,
+        api_version: str | None = None,
         temperature: float = 0.7,
         max_tokens: int | None = None,
     ) -> BaseChatModel:
@@ -50,6 +53,7 @@ class LLMFactory:
             api_key: API key (supports ${ENV_VAR} syntax)
             endpoint: Endpoint URL (for Azure)
             deployment: Deployment name (for Azure)
+            api_version: Azure OpenAI API version
             temperature: Sampling temperature
             max_tokens: Maximum tokens to generate
 
@@ -63,12 +67,22 @@ class LLMFactory:
         if endpoint:
             endpoint = resolve_env_vars(endpoint)
 
+        if api_version:
+            api_version = resolve_env_vars(api_version)
+
+        settings = get_settings()
+
         config = LLMConfig(
             provider=provider,
-            model=model or "gpt-4o",
-            api_key=api_key or os.environ.get("OPENAI_API_KEY"),
-            endpoint=endpoint,
-            deployment=deployment,
+            model=model or settings.llm_model,
+            api_key=(
+                api_key
+                or settings.llm_api_key
+                or os.environ.get("OPENAI_API_KEY")
+            ),
+            endpoint=endpoint or settings.llm_endpoint,
+            deployment=deployment or settings.llm_deployment,
+            api_version=api_version or settings.llm_api_version,
             temperature=temperature,
             max_tokens=max_tokens,
         )
@@ -100,6 +114,9 @@ class LLMFactory:
 
         if config.deployment:
             kwargs["azure_deployment"] = config.deployment
+
+        if config.api_version:
+            kwargs["api_version"] = config.api_version
 
         if config.max_tokens:
             kwargs["max_tokens"] = config.max_tokens

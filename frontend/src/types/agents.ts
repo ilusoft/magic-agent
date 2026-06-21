@@ -16,6 +16,7 @@ export interface AgentDefinition {
   endpoint?: string;
   deployment?: string;
   apiKey?: string;
+  apiVersion?: string;
   defaultParameters: Record<string, string>;
   steps: AgentStepDefinition[];
   tools?: AgentToolDefinition[];

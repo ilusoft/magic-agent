@@ -98,7 +98,16 @@ class WorkflowExpressionEvaluator:
                 raise EvaluationError(f"Unknown node type: {type(node)}", node)
 
     def _evaluate_identifier(self, node: IdentifierNode) -> Any:
-        """Evaluate an identifier with optional path."""
+        """Evaluate an identifier with optional path.
+
+        Resolution order (matches the .NET ``WorkflowExpressionEvaluator``):
+
+        1. ``input`` → step input (string, ``""`` when unset)
+        2. ``lastOutput`` → previous step's output (string, ``""`` when unset)
+        3. ``var.X`` / ``param.X`` / ``parameter.X`` → variables / params
+        4. ``runtime_state`` (e.g. ``output``, ``stepName``, ``stepType``)
+        5. Bare identifier → fallback to variables
+        """
         root = node.root
         path = node.path
 
@@ -111,18 +120,41 @@ class WorkflowExpressionEvaluator:
                 value = self._context.get_parameter(path[0] if path else "")
                 remaining = path[1:] if path else []
             case "input":
-                value = self._context.input
+                # .NET returns ``stepInput ?? string.Empty`` so the
+                # placeholder resolves to ``""`` rather than the
+                # literal ``input`` when no step input was supplied.
+                value = (
+                    "" if self._context.input is None
+                    else self._context.input
+                )
                 remaining = path
             case "lastOutput":
-                value = self._context.last_output
+                # .NET returns ``LastStepOutput ?? string.Empty``;
+                # mirror that here so a placeholder like
+                # ``${{ addToArray(var.translations, lastOutput) }}``
+                # behaves the same on both backends when there is no
+                # previous step.
+                value = (
+                    "" if self._context.last_output is None
+                    else self._context.last_output
+                )
                 remaining = path
             case "step_outputs":
                 # Access step_outputs.<step_id>.output
                 value = self._context.step_outputs
                 remaining = path
             case _:
-                value = self._context.get_variable(root)
-                remaining = path
+                # Mirror the .NET ``RuntimeState`` lookup so a
+                # placeholder like ``{{ output }}`` (used in outcome
+                # conditions) resolves to the current step's output,
+                # and ``{{ stepName }}`` / ``{{ stepType }}`` resolve
+                # to the corresponding step attributes.
+                if root in self._context.runtime_state:
+                    value = self._context.runtime_state[root]
+                    remaining = path
+                else:
+                    value = self._context.get_variable(root)
+                    remaining = path
 
         # Traverse path
         for prop in remaining:
@@ -161,6 +193,10 @@ class WorkflowExpressionEvaluator:
 
         if base is None:
             return None
+
+        # Coerce float indices that are whole numbers (e.g. 0.0 -> 0)
+        if isinstance(index, float) and index.is_integer():
+            index = int(index)
 
         if isinstance(index, int) and isinstance(base, (list, tuple, str)):
             if index < 0 or index >= len(base):

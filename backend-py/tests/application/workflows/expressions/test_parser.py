@@ -24,7 +24,46 @@ class TestWorkflowExpressionParser:
         """Test number parsing."""
         ast = parse("42")
         assert isinstance(ast, NumberNode)
-        assert ast.value == 42.0
+        assert ast.value == 42
+        assert isinstance(ast.value, int) and not isinstance(ast.value, float)
+
+    def test_zero_literal_is_int(self) -> None:
+        """Integer literals (no '.', no 'e') must be int, not float.
+
+        Regression: numbers like ``0`` were parsed as ``0.0`` and broke
+        array-index expressions (``list[0.0]`` raises TypeError).
+        """
+        ast = parse("0")
+        assert isinstance(ast, NumberNode)
+        assert ast.value == 0
+        assert type(ast.value) is int
+
+    def test_one_literal_is_int(self) -> None:
+        ast = parse("1")
+        assert isinstance(ast, NumberNode)
+        assert type(ast.value) is int
+
+    def test_decimal_literal_is_float(self) -> None:
+        """Decimal/exponent literals must stay float."""
+        ast = parse("3.14")
+        assert isinstance(ast, NumberNode)
+        assert ast.value == 3.14
+        assert type(ast.value) is float
+
+    def test_exponent_literal_is_float(self) -> None:
+        ast = parse("1e3")
+        assert isinstance(ast, NumberNode)
+        assert ast.value == 1000.0
+        assert type(ast.value) is float
+
+    def test_array_index_uses_int(self) -> None:
+        """Array access with a literal index produces an int index node."""
+        from src.application.workflows.expressions.nodes import ArrayAccessNode
+
+        ast = parse("var.items[0]")
+        assert isinstance(ast, ArrayAccessNode)
+        assert isinstance(ast.index, NumberNode)
+        assert type(ast.index.value) is int
 
     def test_negative_number(self) -> None:
         """Test negative number parsing."""

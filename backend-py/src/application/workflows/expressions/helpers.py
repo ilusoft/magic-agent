@@ -344,12 +344,12 @@ class ArrayHelpers:
 
     @staticmethod
     @workflow_helper("addToArray", category="Arrays/JSON", description="Adds an item to an array")
-    @workflow_helper_param("array", "The array to add to")
+    @workflow_helper_param("array", "The array to add to (or a single value to wrap)")
     @workflow_helper_param("item", "The item to add")
-    def addToArray(array: list[Any], item: Any) -> list[Any]:
-        result = list(array)
-        result.append(item)
-        return result
+    def addToArray(array: list[Any] | Any, item: Any) -> list[Any]:
+        if not isinstance(array, list):
+            array = [array]
+        return [*array, item]
 
     @staticmethod
     @workflow_helper("removeFromArray", category="Arrays/JSON", description="Removes items from an array")

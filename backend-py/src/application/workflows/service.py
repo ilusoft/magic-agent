@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from pydantic import BaseModel
@@ -39,6 +38,74 @@ class ExpressionResult(BaseModel):
     error: str | None = None
 
 
+def _scan_placeholders(template: str) -> list[tuple[int, int, str, bool]]:
+    """Find ``{{ ... }}`` and ``${{ ... }}`` placeholders in a template.
+
+    Uses a brace-depth scanner so placeholders containing JSON literals
+    with ``}`` (e.g. ``${{ { "key": "value" } }}``) are matched correctly.
+
+    Returns:
+        List of ``(start, end, content, is_expression)`` tuples, sorted by
+        start position. Overlapping matches are not produced.
+    """
+    matches: list[tuple[int, int, str, bool]] = []
+    i = 0
+    n = len(template)
+
+    while i < n - 1:
+        ch = template[i]
+        nxt = template[i + 1]
+
+        if ch == "$" and nxt == "{" and i + 2 < n and template[i + 2] == "{":
+            end = _find_closing(template, i + 3, open_char="{", close_char="}")
+            if end != -1 and end + 1 < n and template[end + 1] == "}":
+                content = template[i + 3 : end]
+                matches.append((i, end + 2, content, True))
+                i = end + 2
+                continue
+        elif ch == "{" and nxt == "{":
+            end = _find_closing(template, i + 2, open_char="{", close_char="}")
+            if end != -1 and end + 1 < n and template[end + 1] == "}":
+                content = template[i + 2 : end]
+                matches.append((i, end + 2, content, False))
+                i = end + 2
+                continue
+        i += 1
+
+    return matches
+
+
+def _find_closing(template: str, start: int, open_char: str, close_char: str) -> int:
+    """Return the index of the matching ``close_char`` accounting for nesting.
+
+    Skips over string literals (``"..."`` and ``'...'``) so that braces
+    inside strings don't affect depth counting.
+    """
+    depth = 1
+    i = start
+    n = len(template)
+    while i < n:
+        ch = template[i]
+        if ch in ("'", '"'):
+            quote = ch
+            i += 1
+            while i < n and template[i] != quote:
+                if template[i] == "\\" and i + 1 < n:
+                    i += 2
+                    continue
+                i += 1
+            i += 1
+            continue
+        if ch == open_char:
+            depth += 1
+        elif ch == close_char:
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return -1
+
+
 class WorkflowExpressionService:
     """Service for workflow expression evaluation and placeholder resolution.
 
@@ -47,9 +114,6 @@ class WorkflowExpressionService:
     - Expression placeholders: ${{expression}}
     - Mixed content with multiple placeholders
     """
-
-    SIMPLE_PATTERN = re.compile(r"\{\{([^}]+)\}\}")
-    EXPRESSION_PATTERN = re.compile(r"\$\{\{([^}]+)\}\}")
 
     def __init__(self, helper_registry: WorkflowHelperRegistry | None = None) -> None:
         self._helpers = helper_registry or WorkflowHelperRegistry()
@@ -64,6 +128,16 @@ class WorkflowExpressionService:
         Returns:
             ExpressionResult with value or error
         """
+        # Short-circuit JSON literals (objects/arrays) since the expression
+        # parser doesn't know how to parse them.
+        stripped = expression.strip()
+        if stripped.startswith(("{", "[")):
+            import json
+            try:
+                return ExpressionResult(value=json.loads(stripped))
+            except json.JSONDecodeError as e:
+                return ExpressionResult(value=None, error=str(e))
+
         try:
             value = evaluate_expression(expression, context)
             return ExpressionResult(value=value)
@@ -75,8 +149,9 @@ class WorkflowExpressionService:
     ) -> ResolvedTemplate:
         """Resolve all placeholders in a template string.
 
-        Supports both {{simple}} and ${{expression}} syntax.
-        Non-placeholder text is preserved verbatim.
+        Supports both ``{{simple}}`` and ``${{expression}}`` syntax.
+        Non-placeholder text is preserved verbatim. Placeholder contents may
+        include JSON literals with nested braces (e.g. ``${{ { "a": 1 } }}``).
 
         Args:
             template: Template string with placeholders
@@ -89,17 +164,7 @@ class WorkflowExpressionService:
         result_parts: list[str] = []
         pos = 0
 
-        # Find all placeholders (both styles)
-        matches: list[tuple[int, int, str, bool]] = []
-
-        for match in self.SIMPLE_PATTERN.finditer(template):
-            matches.append((match.start(), match.end(), match.group(1), False))
-
-        for match in self.EXPRESSION_PATTERN.finditer(template):
-            matches.append((match.start(), match.end(), match.group(1), True))
-
-        # Sort by position
-        matches.sort(key=lambda x: x[0])
+        matches = _scan_placeholders(template)
 
         # Process matches
         evaluator = WorkflowExpressionEvaluator(context, self._helpers)
@@ -113,12 +178,13 @@ class WorkflowExpressionService:
             ph = ResolvedPlaceholder(original=template[start:end])
 
             try:
-                if is_expression:
-                    ast = parse_expression(content)
-                    value = evaluator.evaluate(ast)
+                # Short-circuit JSON literals
+                trimmed = content.strip()
+                if trimmed.startswith(("{", "[")):
+                    import json
+                    value = json.loads(trimmed)
                 else:
-                    # Simple placeholder - treat as identifier
-                    ast = parse_expression(content.strip())
+                    ast = parse_expression(trimmed)
                     value = evaluator.evaluate(ast)
 
                 # Convert value to string
@@ -137,6 +203,9 @@ class WorkflowExpressionService:
             except (ParseError, EvaluationError) as e:
                 ph.error = str(e)
                 ph.value = template[start:end]  # Fall back to original
+            except Exception as e:  # JSONDecodeError and similar
+                ph.error = str(e)
+                ph.value = template[start:end]
 
             placeholders.append(ph)
             result_parts.append(str(ph.value))

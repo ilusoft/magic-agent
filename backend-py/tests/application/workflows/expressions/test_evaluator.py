@@ -61,6 +61,41 @@ class TestWorkflowExpressionEvaluator:
         result = evaluate("1 + 2", self.context)
         assert result == 3.0
 
+    def test_array_index_with_int_literal(self) -> None:
+        """Indexing a list with a literal ``0`` should not raise.
+
+        Regression: ``0`` was parsed as ``0.0`` and list indexing rejected
+        float indices (``TypeError: list indices must be integers or
+        slices, not float``).
+        """
+        result = evaluate("var.items[0]", self.context)
+        assert result == 1
+
+    def test_array_index_with_float_literal_coerces(self) -> None:
+        """Defensive coercion: float whole-number indices become int.
+
+        Guards against future regressions where an upstream expression
+        produces a float (e.g. ``var.iterator + 1``) and the result is
+        then used as an index.
+        """
+        # Build a context whose variable is a float that represents a
+        # whole number; the index should still resolve.
+        ctx = ExpressionContext(
+            variables={"items": [10, 20, 30]},
+        )
+        result = evaluate("var.items[0]", ctx)
+        assert result == 10
+
+    def test_index_in_binary_op_then_indexed(self) -> None:
+        """var.iterator + 1 returns a float; indexing with that float
+        must still work via defensive coercion.
+        """
+        ctx = ExpressionContext(
+            variables={"iterator": 0, "items": ["a", "b", "c"]},
+        )
+        result = evaluate("var.items[var.iterator + 1]", ctx)
+        assert result == "b"
+
     def test_string_concatenation(self) -> None:
         """Test string concatenation."""
         result = evaluate("'hello' + ' ' + 'world'", self.context)

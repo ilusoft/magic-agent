@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 import uuid
 from datetime import datetime
-from typing import Any, AsyncGenerator
+from typing import Any
 
 import structlog
 
@@ -32,6 +32,86 @@ from src.application.agents.run_result import (
 )
 
 logger = structlog.get_logger(__name__)
+
+
+class _NoOpSink:
+    """Internal default sink used by ``execute_stream``.
+
+    Lives next to the executor so the streaming path doesn't have to
+    import the protocol module just to construct a no-op default.
+    Externally, callers should import ``NoOpProgressSink`` from
+    ``src.agent_runtime.progress_sink`` if they need one.
+    """
+
+    async def step_start(self, **_kwargs: Any) -> None:
+        return None
+
+    async def step_complete(self, **_kwargs: Any) -> None:
+        return None
+
+    async def run_complete(self, _run_result: Any) -> None:
+        return None
+
+
+def _resolve_outcome_name(
+    resolved_step: dict[str, Any],
+    output: Any,
+    next_step_name: str | None,
+) -> str | None:
+    """Return the name of the outcome that was selected for this step.
+
+    Mirrors what ``DefaultAgentRunner`` does in the .NET backend: pick
+    the first outcome whose ``nextStep`` matches the routing target
+    (or whose ``endWorkflow`` flag is set). ``None`` if the step has
+    no outcomes defined.
+    """
+    outcomes = resolved_step.get("outcomes") or []
+    if not outcomes:
+        return None
+
+    end_workflow = next_step_name is None
+
+    for raw in outcomes:
+        outcome = raw if isinstance(raw, dict) else {}
+        name = outcome.get("name")
+        if not isinstance(name, str):
+            continue
+        candidate_next = outcome.get("nextStep")
+        candidate_end = bool(outcome.get("endWorkflow"))
+        if end_workflow and candidate_end:
+            return name
+        if not end_workflow and candidate_next == next_step_name:
+            return name
+
+    return None
+
+
+def _with_step_error(
+    step: AgentStepExecutionResult,
+    message: str,
+) -> AgentStepExecutionResult:
+    """Return a copy of ``step`` annotated with an error message.
+
+    The .NET ``AgentStepExecutionResult`` doesn't carry a free-form
+    error field, so we surface the failure via the existing
+    ``toolErrorDetected`` flag and a synthetic tool call. This keeps
+    the JSON shape (and the SPA's expectations) stable while still
+    letting the UI render a useful error message for the step.
+    """
+    from dataclasses import replace
+
+    synthetic_tool = AgentToolCall(
+        tool_name="__step_error__",
+        invocation_id=None,
+        result=None,
+        arguments_json=None,
+        error_message=message,
+    )
+    return replace(
+        step,
+        tool_invocations=[*step.tool_invocations, synthetic_tool],
+        tool_error_detected=True,
+    )
 
 
 class WorkflowExecutor:
@@ -191,24 +271,44 @@ class WorkflowExecutor:
         agent_definition: dict[str, Any],
         input_text: str,
         parameters: dict[str, Any] | None = None,
-    ) -> AsyncGenerator[dict[str, Any], None]:
-        """Execute workflow with streaming progress events.
+        progress_sink: Any | None = None,
+    ) -> AgentRunResult:
+        """Execute a workflow while pushing progress events to a sink.
+
+        The non-streaming ``execute()`` path also accepts a progress
+        callback; this method is the streaming equivalent. Instead of
+        yielding a stream of dicts (the old wire format), it calls
+        ``step_start``/``step_complete``/``run_complete`` on the
+        supplied ``progress_sink``. The .NET backend's
+        ``StreamingAgentRunProgressSink`` is the canonical
+        implementation; ``SseProgressSink`` is the Python equivalent.
 
         Args:
-            agent_definition: Full agent definition dict
-            input_text: User input
-            parameters: Runtime parameters
+            agent_definition: Full agent definition dict.
+            input_text: User input.
+            parameters: Runtime parameters.
+            progress_sink: Optional ``AgentRunProgressSink`` (any
+                object with the three async methods). ``None`` is
+                equivalent to ``NoOpProgressSink()`` and used for
+                backward-compat callers that don't care about events.
 
-        Yields:
-            Progress events
+        Returns:
+            The final ``AgentRunResult`` (same shape the
+            ``/api/agents/{id}/runs/{conversationId}/debug`` endpoint
+            serves from the diagnostics store).
         """
+        if progress_sink is None:
+            progress_sink = _NoOpSink()
+
         run_id = str(uuid.uuid4())
         start_time = time.time()
+        agent_id = agent_definition.get(
+            "id", agent_definition.get("name", "unknown")
+        )
 
         steps = agent_definition.get("steps", [])
         if not steps:
-            yield {"event_type": "error", "error": "Agent has no steps defined"}
-            return
+            raise ValueError("Agent has no steps defined")
 
         # Initialize MCP tools from agent definition
         mcp_tools: dict[str, list[Any]] = {}
@@ -229,12 +329,14 @@ class WorkflowExecutor:
         iteration = 0
         current_step_name: str | None = start_step_name
         conversation_id: str | None = None
-
-        yield {
-            "event_type": "start",
-            "run_id": run_id,
-            "start_step": start_step_name,
-        }
+        # Mirrors ``DefaultAgentRunner.lastStepOutput`` in the .NET
+        # backend. ``None`` until the first step produces output; from
+        # then on it's the previous step's output string, exposed as
+        # ``lastOutput`` in expressions and used to build the
+        # ``runtime_state.output`` for the next step.
+        last_step_output: Any = None
+        workflow_failed = False
+        workflow_error: str | None = None
 
         try:
             while current_step_name and iteration < max_iterations:
@@ -245,26 +347,61 @@ class WorkflowExecutor:
 
                 step_name = step.get("name", current_step_name)
                 step_type = step.get("type", "agent")
+                resolved_step = step
 
-                yield {
-                    "event_type": "step_start",
-                    "step_id": step_name,
-                    "step_type": step_type,
-                    "iteration": iteration,
-                }
+                await progress_sink.step_start(
+                    agent_id=agent_id,
+                    step_name=step_name,
+                    step_type=step_type,
+                    iteration=iteration,
+                )
 
                 step_start_time = time.time()
 
-                # Build context
+                # Build a fresh expression context for this step.
+                # ``last_output`` is None on the first iteration and
+                # carries the previous step's output on subsequent
+                # iterations; ``runtime_state`` mirrors the .NET
+                # ``StepOutcomeResolver.BuildRuntimeState`` shape so
+                # expressions like ``output`` / ``stepName`` /
+                # ``stepType`` resolve to the current step's metadata.
                 context = self._build_expression_context(
                     variables=variables,
                     parameters=parameters or {},
                     input=input_text,
                     step_outputs=step_outputs,
+                    last_output=last_step_output,
+                    runtime_state={
+                        "output": last_step_output or "",
+                        "stepName": step_name,
+                        "stepType": step_type,
+                    },
                 )
 
+                error_message: str | None = None
+                output: Any = None
+                outcome: str | None = None
+                next_step: str | None = None
+                end_workflow = False
+                resolved_parameters: dict[str, str] | None = None
+                parameter_debug: dict[str, Any] | None = None
+                variable_debug: dict[str, Any] | None = None
+                thread_context: dict[str, Any] | None = None
+                tool_invocations: list = []
+
                 try:
-                    resolved_step = self._resolve_step(step, variables, parameters or {}, input_text, step_outputs)
+                    resolved_step = self._resolve_step(
+                        step,
+                        variables,
+                        parameters or {},
+                        input_text,
+                        step_outputs,
+                        last_output=context.last_output,
+                    )
+                    resolved_parameters = dict(resolved_step.get("parameters", {}))
+                    parameter_debug = resolved_step.get("parameter_debug")
+                    variable_debug = resolved_step.get("variable_debug")
+
                     output, new_conversation_id = await self._execute_step(
                         step=resolved_step,
                         step_type=step_type,
@@ -274,133 +411,149 @@ class WorkflowExecutor:
                         mcp_tools=mcp_tools,
                         conversation_id=conversation_id,
                     )
-                    # Update conversation_id for next iteration if a new one was created
                     if new_conversation_id:
                         conversation_id = new_conversation_id
 
-                    step_outputs[step_name] = {
-                        "type": step_type,
-                        "output": output,
-                        "duration_ms": int((time.time() - step_start_time) * 1000),
-                    }
-
-                    yield {
-                        "event_type": "step_complete",
-                        "step_id": step_name,
-                        "output": output,
-                        "duration_ms": step_outputs[step_name]["duration_ms"],
-                    }
-
                 except Exception as e:
-                    logger.error("step_execution_error", step_id=step_name, error=str(e))
-                    yield {
-                        "event_type": "error",
-                        "step_id": step_name,
-                        "error": str(e),
-                        "recoverable": True,
-                    }
-                    step_outputs[step_name] = {
-                        "type": step_type,
-                        "output": None,
-                        "error": str(e),
-                    }
+                    logger.error(
+                        "step_execution_error",
+                        step_id=step_name,
+                        error=str(e),
+                    )
+                    error_message = str(e)
 
-                # Determine next step - use resolved_step for outcome expressions
-                current_step_name = self._determine_next_step(
-                    step=resolved_step,
-                    output=step_outputs[step_name].get("output"),
-                    variables=variables,
-                    context=context,
+                elapsed_ms = int((time.time() - step_start_time) * 1000)
+
+                step_record = {
+                    "type": step_type,
+                    "output": output,
+                    "duration_ms": elapsed_ms,
+                    # Persist the resolved parameters / debug info on
+                    # the step record so the final ``AgentRunResult``
+                    # (and the diagnostics payload) can surface the
+                    # exact strings the resolver produced, including
+                    # the ``${{ lastOutput }}`` substitution.
+                    "resolved_parameters": resolved_parameters,
+                    "parameter_debug": parameter_debug,
+                    "variable_debug": variable_debug,
+                }
+                if error_message is not None:
+                    step_record["error"] = error_message
+                step_outputs[step_name] = step_record
+
+                # Persist the step's output for the next iteration's
+                # ``lastOutput`` and ``runtime_state.output`` lookups.
+                # A failed step surfaces as the error message so the
+                # subsequent step's expressions see something
+                # meaningful instead of a silent ``None``.
+                last_step_output = output if output is not None else error_message
+
+                # Determine next step before publishing the completion
+                # event so the SSE payload can include outcome /
+                # nextStep / endWorkflow.
+                try:
+                    next_step_name = self._determine_next_step(
+                        step=resolved_step,
+                        output=output,
+                        variables=variables,
+                        context=context,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "next_step_error", step_id=step_name, error=str(e)
+                    )
+                    next_step_name = None
+                    if error_message is None:
+                        error_message = str(e)
+
+                # Find which outcome fired, if any, by reading the
+                # outcomes list off the resolved step.
+                outcome = _resolve_outcome_name(resolved_step, output, next_step_name)
+                end_workflow = next_step_name is None
+                if next_step_name is not None:
+                    next_step = next_step_name
+
+                # Build the typed step result and forward to the sink.
+                step_result = AgentStepExecutionResult(
+                    name=step_name,
+                    type=step_type,
+                    output=output if output is not None else "",
+                    resolved_parameters=resolved_parameters,
+                    parameter_debug=parameter_debug,
+                    variable_debug=variable_debug,
+                    thread_context=thread_context,
+                    outcome=outcome,
+                    next_step=next_step,
+                    end_workflow=end_workflow,
+                    tool_invocations=tool_invocations,
+                )
+                if error_message is not None:
+                    step_result = _with_step_error(step_result, error_message)
+
+                await progress_sink.step_complete(
+                    agent_id=agent_id,
+                    step=step_result,
+                    elapsed_ms=elapsed_ms,
                 )
 
+                current_step_name = next_step_name
                 iteration += 1
 
             final_output = ""
             if step_outputs:
                 last_step_id = list(step_outputs.keys())[-1]
-                final_output = step_outputs[last_step_id].get("output", "")
+                final_output = step_outputs[last_step_id].get("output") or ""
 
-            yield {
-                "event_type": "complete",
-                "run_id": run_id,
-                "final_output": final_output,
-                "total_duration_ms": int((time.time() - start_time) * 1000),
-            }
-
-            # Build and save run result to diagnostics store
-            agent_id = agent_definition.get("id", agent_definition.get("name", "unknown"))
-            step_results = []
-            for step_name, step_data in step_outputs.items():
-                step_result = AgentStepExecutionResult(
-                    name=step_name,
-                    type=step_data.get("type", "unknown"),
-                    output=step_data.get("output", ""),
-                )
-                step_results.append(step_result)
-
-            run_result = AgentRunResult(
-                agent_id=agent_id,
-                status="completed",
-                steps=step_results,
-                conversation_id=conversation_id,
-            )
-
-            # Save to diagnostics store if conversation_id is available
-            if run_result.conversation_id:
-                await self._diagnostics_store.save_run(run_result.conversation_id, run_result)
-
+            total_duration_ms = int((time.time() - start_time) * 1000)
+            run_status = "completed"
         except Exception as e:
-            logger.error("workflow_execution_error", run_id=run_id, error=str(e))
-            yield {
-                "event_type": "error",
-                "run_id": run_id,
-                "error": str(e),
-                "recoverable": False,
-            }
-
-            # Save failed run to diagnostics store
-            agent_id = agent_definition.get("id", agent_definition.get("name", "unknown"))
-            step_results = []
-            for step_name, step_data in step_outputs.items():
-                step_result = AgentStepExecutionResult(
-                    name=step_name,
-                    type=step_data.get("type", "unknown"),
-                    output=step_data.get("output", ""),
-                )
-                step_results.append(step_result)
-
-            run_result = AgentRunResult(
-                agent_id=agent_id,
-                status="failed",
-                steps=step_results,
-                conversation_id=conversation_id,
+            logger.error(
+                "workflow_execution_error", run_id=run_id, error=str(e)
             )
-
-            if run_result.conversation_id:
-                await self._diagnostics_store.save_run(run_result.conversation_id, run_result)
+            workflow_failed = True
+            workflow_error = str(e)
+            run_status = "failed"
+            total_duration_ms = int((time.time() - start_time) * 1000)
         finally:
-            # Cleanup MCP connections
             await self._mcp_registry.disconnect_all()
 
-    def _make_stream_callback(
-        self,
-        run_id: str,
-        yield_fn: Any,
-    ) -> Any:
-        """Create a progress callback for streaming.
+        step_results: list[AgentStepExecutionResult] = []
+        for step_name, step_data in step_outputs.items():
+            step_result = AgentStepExecutionResult(
+                name=step_name,
+                type=step_data.get("type", "unknown"),
+                output=step_data.get("output") or "",
+                resolved_parameters=step_data.get("resolved_parameters"),
+                parameter_debug=step_data.get("parameter_debug"),
+                variable_debug=step_data.get("variable_debug"),
+                outcome=step_data.get("outcome"),
+                next_step=step_data.get("next_step"),
+                end_workflow=step_data.get("end_workflow", False),
+            )
+            if "error" in step_data:
+                step_result = _with_step_error(
+                    step_result, str(step_data["error"])
+                )
+            step_results.append(step_result)
 
-        Args:
-            run_id: Run identifier
-            yield_fn: Async generator yield function
+        run_result = AgentRunResult(
+            agent_id=agent_id,
+            status=run_status,
+            steps=step_results,
+            conversation_id=conversation_id,
+        )
 
-        Returns:
-            Progress callback
-        """
-        async def callback(event: dict[str, Any]) -> None:
-            event["run_id"] = run_id
-            await yield_fn(event)
+        if run_result.conversation_id:
+            await self._diagnostics_store.save_run(
+                run_result.conversation_id, run_result
+            )
 
-        return callback
+        if not workflow_failed:
+            await progress_sink.run_complete(run_result)
+            return run_result
+
+        # Re-raise after we've persisted the diagnostic record.
+        raise RuntimeError(workflow_error or "Workflow execution failed")
 
     async def _execute_workflow(
         self,
@@ -447,6 +600,10 @@ class WorkflowExecutor:
 
             step_name = step.get("name", current_step_name)
             step_type = step.get("type", "agent")
+            # Default to the raw step so _determine_next_step has a valid
+            # input even when an exception short-circuits the try block
+            # before resolved_step gets assigned.
+            resolved_step = step
 
             # Emit step_start event
             if progress_callback:
@@ -461,7 +618,14 @@ class WorkflowExecutor:
 
             try:
                 # Resolve step configuration with current variables
-                resolved_step = self._resolve_step(step, variables, parameters, input_text, step_outputs)
+                resolved_step = self._resolve_step(
+                    step,
+                    variables,
+                    parameters,
+                    input_text,
+                    step_outputs,
+                    last_output=context.last_output,
+                )
 
                 # Execute step
                 output, new_conversation_id = await self._execute_step(
@@ -550,6 +714,7 @@ class WorkflowExecutor:
         parameters: dict[str, Any],
         input_text: str,
         step_outputs: dict[str, Any],
+        last_output: Any = None,
     ) -> dict[str, Any]:
         """Resolve placeholders in step configuration.
 
@@ -559,6 +724,8 @@ class WorkflowExecutor:
             parameters: Runtime parameters
             input_text: User input
             step_outputs: Previous step outputs
+            last_output: Output from the previously executed step (exposed
+                as ``lastOutput`` in expressions)
 
         Returns:
             Resolved step configuration
@@ -571,6 +738,7 @@ class WorkflowExecutor:
             parameters=parameters,
             input=input_text,
             step_outputs=step_outputs,
+            last_output=last_output,
         )
 
         # Resolve parameters
@@ -662,6 +830,7 @@ class WorkflowExecutor:
         input: str,
         step_outputs: dict[str, Any],
         last_output: Any = None,
+        runtime_state: dict[str, Any] | None = None,
     ) -> ExpressionContext:
         """Build expression context.
 
@@ -671,6 +840,10 @@ class WorkflowExecutor:
             input: User input
             step_outputs: Outputs from previous steps
             last_output: Output from most recent step
+            runtime_state: Per-step runtime identifiers (``output``,
+                ``stepName``, ``stepType``) that should be exposed as
+                top-level identifiers in expressions. Mirrors the
+                .NET ``WorkflowExpressionContext.RuntimeState``.
 
         Returns:
             ExpressionContext
@@ -680,6 +853,7 @@ class WorkflowExecutor:
             parameters=parameters,
             input=input,
             last_output=last_output,
+            runtime_state=runtime_state or {},
             step_outputs=step_outputs,
         )
 
@@ -824,12 +998,29 @@ class WorkflowExecutor:
         )
 
         # Get LLM config from agent definition
-        llm_config = agent_definition.get("llm", {})
+        llm_config = dict(agent_definition.get("llm", {}) or {})
         if not llm_config:
             llm_config = {
-                "provider": "azure-openai",
-                "model": "gpt-4o",
+                "provider": agent_definition.get("provider", "azure-openai"),
+                "model": agent_definition.get("model", "gpt-4o"),
             }
+
+        # Backfill top-level fields used by the JSON format
+        llm_config.setdefault("endpoint", agent_definition.get("endpoint"))
+        llm_config.setdefault("deployment", agent_definition.get("deployment"))
+        llm_config.setdefault("api_key", agent_definition.get("apiKey"))
+        llm_config.setdefault("api_version", agent_definition.get("apiVersion"))
+
+        # Allow defaultParameters (e.g. temperature, max_tokens) to flow into
+        # the LLM client. Accept both the snake_case and camelCase keys for
+        # compatibility with the JSON schema used by the agent definitions.
+        default_params: dict[str, Any] = {
+            **agent_definition.get("default_parameters", {}),
+            **agent_definition.get("defaultParameters", {}),
+        }
+        for key in ("temperature", "max_tokens", "maxTokens"):
+            if key in default_params and key not in llm_config:
+                llm_config[key] = default_params[key]
 
         # Create LLM
         llm = self._llm_factory.create_chat_model(
@@ -838,7 +1029,9 @@ class WorkflowExecutor:
             api_key=llm_config.get("api_key"),
             endpoint=llm_config.get("endpoint"),
             deployment=llm_config.get("deployment"),
+            api_version=llm_config.get("api_version"),
             temperature=llm_config.get("temperature", 0.7),
+            max_tokens=llm_config.get("max_tokens") or llm_config.get("maxTokens"),
         )
 
         # Collect tools for this step

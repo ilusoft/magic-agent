@@ -10,8 +10,15 @@ from pydantic import BaseModel, Field
 class ExpressionContext(BaseModel):
     """Context for evaluating workflow expressions.
 
-    Contains variables, parameters, input, and last output that can be
-    referenced in expressions using var.*, param.*, input, and lastOutput.
+    Contains variables, parameters, input, runtime state, and last
+    output that can be referenced in expressions using ``var.*``,
+    ``param.*``, ``input``, ``lastOutput``, and the runtime-state
+    keys (``output``, ``stepName``, ``stepType``).
+
+    The ``runtime_state`` keys mirror what the .NET backend exposes
+    through ``StepOutcomeResolver.BuildRuntimeState`` so the same
+    ``agents.json`` file yields the same identifiers in both
+    backends.
     """
 
     variables: dict[str, Any] = Field(
@@ -28,7 +35,17 @@ class ExpressionContext(BaseModel):
     )
     last_output: Any = Field(
         default=None,
-        description="Output from the last executed step",
+        description="Output from the last executed step (exposed as lastOutput)",
+    )
+    runtime_state: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Per-step runtime identifiers (output, stepName, stepType) "
+            "exposed as top-level identifiers. Mirrors the .NET "
+            "WorkflowExpressionContext.RuntimeState so outcome "
+            "conditions and placeholders behave the same on both "
+            "backends."
+        ),
     )
     step_outputs: dict[str, Any] = Field(
         default_factory=dict,

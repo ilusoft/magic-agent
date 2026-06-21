@@ -6,7 +6,10 @@
       "description": "Agent to assist the qualification of productions",
       "endpoint": "https://jorge-mafrq1ph-eastus2.cognitiveservices.azure.com/",
       "deployment": "gpt-5-mini",
-      "defaultParameters": {},
+      "apiVersion": "2024-12-01-preview",
+      "defaultParameters": {
+        "temperature": "1"
+      },
       "steps": [
         {
           "name": "general chat agent",
@@ -80,7 +83,7 @@
           "name": "set-out-vars",
           "type": "setVariables",
           "parameters": {
-            "translations": "${{ addToArray(lastOutput, var.translations) }}",
+            "translations": "${{ addToArray(var.translations, lastOutput) }}",
             "combinedOutput": "{{var.originalInput}} ==> \n                 \n   - Spanish : \n        ${{ var.translations[0] }}\n   \n   - French :\n        ${{ var.translations[1] }}\n\n   - German :\n        ${{ var.translations[2] }}\n\n   - Portuguese :\n        ${{ var.translations[3] }}"
           },
           "variableTypes": {
@@ -133,7 +136,7 @@
           "type": "setVariables",
           "parameters": {
             "iterator": "${{ var.iterator + 1 }}",
-            "translations": "${{ addToArray(lastOutput, var.translations) }}"
+            "translations": "${{ addToArray(var.translations, lastOutput) }}"
           },
           "variableTypes": {
             "iterator": "number",

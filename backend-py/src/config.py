@@ -23,7 +23,7 @@ class Settings(BaseSettings):
 
     # Runtime
     configs_path: Path = Field(
-        default=Path("../../configs/agents"),
+        default=CONFIG_DIR.parent / "configs" / "agents",
         description="Path to agent/workflow JSON definitions",
     )
 
@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     llm_model: str = Field(
         default="gpt-4o",
         description="Model name",
+    )
+    llm_api_version: str | None = Field(
+        default=None,
+        description="Azure OpenAI API version (e.g. 2024-08-01-preview)",
     )
 
     # API

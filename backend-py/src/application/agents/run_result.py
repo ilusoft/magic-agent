@@ -1,10 +1,37 @@
-"""Agent run result models for diagnostics."""
+"""Agent run result models for diagnostics.
+
+The dataclasses use ``snake_case`` field names internally for
+ergonomics, but ``to_dict()`` serialises to the ``camelCase`` JSON
+shape the SPA expects (matching the .NET backend's
+``System.Text.Json`` defaults).
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+
+
+def _camel(snake: str) -> str:
+    """Convert ``snake_case`` to ``camelCase`` for one segment."""
+    head, *rest = snake.split("_")
+    return head + "".join(part.capitalize() for part in rest)
+
+
+def _camel_dict(payload: dict[str, Any]) -> dict[str, Any]:
+    """Recursively remap ``snake_case`` keys to ``camelCase``."""
+    out: dict[str, Any] = {}
+    for key, value in payload.items():
+        if isinstance(value, dict):
+            value = _camel_dict(value)
+        elif isinstance(value, list):
+            value = [
+                _camel_dict(item) if isinstance(item, dict) else item
+                for item in value
+            ]
+        out[_camel(key)] = value
+    return out
 
 
 @dataclass
@@ -42,22 +69,30 @@ class AgentStepExecutionResult:
     tool_error_detected: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "name": self.name,
-            "type": self.type,
-            "output": self.output,
-            "input": self.input,
-            "resolved_parameters": self.resolved_parameters,
-            "parameter_debug": self.parameter_debug,
-            "variable_debug": self.variable_debug,
-            "thread_context": self.thread_context,
-            "outcome": self.outcome,
-            "next_step": self.next_step,
-            "end_workflow": self.end_workflow,
-            "tool_invocations": [t.to_dict() for t in self.tool_invocations],
-            "tool_error_detected": self.tool_error_detected,
-        }
+        """Convert to camelCase JSON-ready dict.
+
+        Matches the .NET ``AgentStepExecutionResult`` serialisation
+        (camelCase property names) so the SPA's
+        ``AgentStepExecutionResult`` TypeScript interface lines up
+        with the wire payload.
+        """
+        return _camel_dict(
+            {
+                "name": self.name,
+                "type": self.type,
+                "output": self.output,
+                "input": self.input,
+                "resolved_parameters": self.resolved_parameters,
+                "parameter_debug": self.parameter_debug,
+                "variable_debug": self.variable_debug,
+                "thread_context": self.thread_context,
+                "outcome": self.outcome,
+                "next_step": self.next_step,
+                "end_workflow": self.end_workflow,
+                "tool_invocations": [t.to_dict() for t in self.tool_invocations],
+                "tool_error_detected": self.tool_error_detected,
+            }
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AgentStepExecutionResult:
@@ -105,16 +140,18 @@ class AgentToolCall:
     error_code: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "tool_name": self.tool_name,
-            "invocation_id": self.invocation_id,
-            "result": self.result,
-            "arguments_json": self.arguments_json,
-            "error_message": self.error_message,
-            "error_details": self.error_details,
-            "error_code": self.error_code,
-        }
+        """Convert to camelCase JSON-ready dict."""
+        return _camel_dict(
+            {
+                "tool_name": self.tool_name,
+                "invocation_id": self.invocation_id,
+                "result": self.result,
+                "arguments_json": self.arguments_json,
+                "error_message": self.error_message,
+                "error_details": self.error_details,
+                "error_code": self.error_code,
+            }
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AgentToolCall:
@@ -149,14 +186,21 @@ class AgentRunResult:
     completed_at: datetime = field(default_factory=datetime.utcnow)
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "agent_id": self.agent_id,
-            "status": self.status,
-            "steps": [s.to_dict() for s in self.steps],
-            "conversation_id": self.conversation_id,
-            "completed_at": self.completed_at.isoformat(),
-        }
+        """Convert to camelCase JSON-ready dict.
+
+        Matches the .NET ``AgentRunResult`` serialisation so the SPA
+        can read ``agentId``/``conversationId``/``completedAt``
+        directly off the SSE ``run-complete`` payload.
+        """
+        return _camel_dict(
+            {
+                "agent_id": self.agent_id,
+                "status": self.status,
+                "steps": [s.to_dict() for s in self.steps],
+                "conversation_id": self.conversation_id,
+                "completed_at": self.completed_at.isoformat(),
+            }
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AgentRunResult:

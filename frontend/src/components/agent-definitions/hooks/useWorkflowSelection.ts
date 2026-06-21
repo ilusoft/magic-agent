@@ -94,6 +94,7 @@ export function useWorkflowSelection({
       endpoint: "",
       deployment: "",
       apiKey: "",
+      apiVersion: "",
       defaultParameters: [createKeyValueEntry()],
       streamingEnabled: false,
       streamingMode: "sse",
@@ -114,6 +115,7 @@ export function useWorkflowSelection({
       endpoint: agent.endpoint ?? "",
       deployment: agent.deployment ?? "",
       apiKey: agent.apiKey ?? "",
+      apiVersion: agent.apiVersion ?? "",
       defaultParameters:
         parameterEntries.length > 0
           ? parameterEntries
@@ -213,6 +215,7 @@ export function useWorkflowSelection({
 
       const trimmedId = workflowForm.id.trim();
       const trimmedApiKey = workflowForm.apiKey.trim();
+      const trimmedApiVersion = workflowForm.apiVersion.trim();
       const defaultParametersRecord = recordFromEntries(
         workflowForm.defaultParameters
       );
@@ -237,6 +240,7 @@ export function useWorkflowSelection({
             endpoint: workflowForm.endpoint.trim() || undefined,
             deployment: workflowForm.deployment.trim() || undefined,
             apiKey: trimmedApiKey || undefined,
+            apiVersion: trimmedApiVersion || undefined,
             defaultParameters: defaultParametersRecord,
             steps: [],
             tools: [],
@@ -283,6 +287,7 @@ export function useWorkflowSelection({
             endpoint: workflowForm.endpoint.trim() || undefined,
             deployment: workflowForm.deployment.trim() || undefined,
             apiKey: trimmedApiKey || undefined,
+            apiVersion: trimmedApiVersion || undefined,
             defaultParameters: defaultParametersRecord,
             streaming: workflowForm.streamingEnabled
               ? {
