@@ -34,6 +34,89 @@ def _camel_dict(payload: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _fingerprint_api_key(api_key: str | None) -> str | None:
+    """Return a short, non-reversible identifier for ``api_key``.
+
+    The diagnostics payload must let operators confirm which credential
+    was used without leaking the secret. We keep the trailing 4
+    characters when an explicit key was provided so the SPA can still
+    tell "Azure key A" apart from "Azure key B". ``None`` when the
+    key was synthesised by the factory (e.g. the ``not-needed``
+    placeholder used by OpenAI-compatible local servers).
+    """
+    if not api_key:
+        return None
+    if len(api_key) <= 4:
+        return "***"
+    return f"***{api_key[-4:]}"
+
+
+@dataclass
+class LLMCallConfig:
+    """Resolved LLM configuration for a step.
+
+    Captures *which* LLM was actually invoked so the diagnostics
+    endpoint can prove a run hit the expected provider/model
+    (e.g. local qwen vs. Azure OpenAI) without exposing secrets.
+
+    Attributes:
+        provider: LLM provider (``azure-openai``, ``openai``,
+            ``openai-compatible``).
+        model: Model name passed to the chat client.
+        endpoint: Azure OpenAI endpoint, if applicable.
+        base_url: Base URL for OpenAI-compatible providers.
+        deployment: Azure OpenAI deployment name, if applicable.
+        api_version: Azure OpenAI API version, if applicable.
+        temperature: Sampling temperature, if set.
+        max_tokens: Max output tokens, if set.
+        api_key_fingerprint: Last 4 characters of the API key that
+            was provided in the agent definition (``None`` when no
+            key was supplied — e.g. local servers that accept any
+            value).
+    """
+
+    provider: str
+    model: str | None = None
+    endpoint: str | None = None
+    base_url: str | None = None
+    deployment: str | None = None
+    api_version: str | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
+    api_key_fingerprint: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to camelCase JSON-ready dict."""
+        return _camel_dict(
+            {
+                "provider": self.provider,
+                "model": self.model,
+                "endpoint": self.endpoint,
+                "base_url": self.base_url,
+                "deployment": self.deployment,
+                "api_version": self.api_version,
+                "temperature": self.temperature,
+                "max_tokens": self.max_tokens,
+                "api_key_fingerprint": self.api_key_fingerprint,
+            }
+        )
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LLMCallConfig:
+        """Create from dictionary."""
+        return cls(
+            provider=data.get("provider", ""),
+            model=data.get("model"),
+            endpoint=data.get("endpoint"),
+            base_url=data.get("base_url"),
+            deployment=data.get("deployment"),
+            api_version=data.get("api_version"),
+            temperature=data.get("temperature"),
+            max_tokens=data.get("max_tokens"),
+            api_key_fingerprint=data.get("api_key_fingerprint"),
+        )
+
+
 @dataclass
 class AgentStepExecutionResult:
     """Result of a single step execution.
@@ -52,6 +135,12 @@ class AgentStepExecutionResult:
         end_workflow: Whether workflow ended after this step
         tool_invocations: List of tool calls made during this step
         tool_error_detected: Whether a tool error occurred
+        llm_config: Snapshot of the LLM that handled this step. Only
+            populated for ``type == "agent"`` steps; ``None`` for
+            ``setVariables``/``echo``. Surfaces provider/model/
+            endpoint/base_url in the diagnostics endpoint so operators
+            can verify the expected backend (e.g. local qwen vs.
+            Azure OpenAI) was actually called.
     """
 
     name: str
@@ -67,6 +156,7 @@ class AgentStepExecutionResult:
     end_workflow: bool = False
     tool_invocations: list[AgentToolCall] = field(default_factory=list)
     tool_error_detected: bool = False
+    llm_config: LLMCallConfig | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to camelCase JSON-ready dict.
@@ -91,6 +181,9 @@ class AgentStepExecutionResult:
                 "end_workflow": self.end_workflow,
                 "tool_invocations": [t.to_dict() for t in self.tool_invocations],
                 "tool_error_detected": self.tool_error_detected,
+                "llm_config": (
+                    self.llm_config.to_dict() if self.llm_config else None
+                ),
             }
         )
 
@@ -100,6 +193,12 @@ class AgentStepExecutionResult:
         tool_invocations = [
             AgentToolCall.from_dict(t) for t in data.get("tool_invocations", [])
         ]
+        llm_config_data = data.get("llm_config")
+        llm_config = (
+            LLMCallConfig.from_dict(llm_config_data)
+            if isinstance(llm_config_data, dict)
+            else None
+        )
         return cls(
             name=data.get("name", ""),
             type=data.get("type", ""),
@@ -114,6 +213,7 @@ class AgentStepExecutionResult:
             end_workflow=data.get("end_workflow", False),
             tool_invocations=tool_invocations,
             tool_error_detected=data.get("tool_error_detected", False),
+            llm_config=llm_config,
         )
 
 

@@ -53,6 +53,7 @@ class TestCreateChatModel:
         class _FakeSettings:
             llm_api_key = "settings-key"
             llm_endpoint = "https://settings.openai.azure.com/"
+            llm_base_url = "http://settings-host:1234/v1"
             llm_deployment = "settings-deployment"
             llm_model = "settings-model"
             llm_api_version = "settings-version"
@@ -104,6 +105,7 @@ class TestCreateChatModel:
         class _FakeSettings:
             llm_api_key = "settings-key"
             llm_endpoint = "https://settings.openai.azure.com/"
+            llm_base_url = "http://settings-host:1234/v1"
             llm_deployment = "settings-deployment"
             llm_model = "settings-model"
             llm_api_version = "settings-version"
@@ -140,6 +142,7 @@ class TestCreateChatModel:
         class _FakeSettings:
             llm_api_key = "real-key"
             llm_endpoint = "https://x.openai.azure.com/"
+            llm_base_url = None
             llm_deployment = "gpt-5-mini"
             llm_model = "gpt-5-mini"
             llm_api_version = "2024-08-01-preview"
@@ -169,6 +172,7 @@ class TestCreateChatModel:
         class _FakeSettings:
             llm_api_key = None
             llm_endpoint = None
+            llm_base_url = None
             llm_deployment = "gpt-5-mini"
             llm_model = "gpt-5-mini"
             llm_api_version = "2024-08-01-preview"
@@ -185,3 +189,126 @@ class TestCreateChatModel:
         factory = LLMFactory()
         with pytest.raises(ValueError, match="endpoint is required"):
             factory.create_chat_model(provider="azure-openai")
+
+
+class TestOpenAICompatibleProvider:
+    """Tests for the ``openai-compatible`` provider (local LLM servers)."""
+
+    def test_base_url_and_explicit_args_win(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src import config as config_module
+        from src.infrastructure.llm import factory as factory_module
+
+        class _FakeSettings:
+            llm_api_key = None
+            llm_base_url = "http://settings-host:1234/v1"
+            llm_model = "settings-model"
+            llm_endpoint = None
+            llm_deployment = None
+            llm_api_version = None
+
+        monkeypatch.setattr(
+            config_module, "get_settings", lambda: _FakeSettings()
+        )
+        monkeypatch.setattr(
+            factory_module, "get_settings", lambda: _FakeSettings()
+        )
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        factory = LLMFactory()
+        llm = factory.create_chat_model(
+            provider="openai-compatible",
+            model="qwen-3.6",
+            base_url="http://127.0.0.1:8000/v1",
+        )
+
+        # ChatOpenAI exposes the base URL through ``openai_api_base``.
+        assert llm.openai_api_base == "http://127.0.0.1:8000/v1"  # type: ignore[attr-defined]
+        assert llm.model_name == "qwen-3.6"  # type: ignore[attr-defined]
+        # No key supplied → fallback placeholder so local servers that
+        # validate presence (but not value) still work.
+        assert llm.openai_api_key.get_secret_value() == "not-needed"  # type: ignore[attr-defined]
+
+    def test_settings_base_url_is_used_when_caller_omits(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src import config as config_module
+        from src.infrastructure.llm import factory as factory_module
+
+        class _FakeSettings:
+            llm_api_key = None
+            llm_base_url = "http://127.0.0.1:8000/v1"
+            llm_model = "qwen-3.6"
+            llm_endpoint = None
+            llm_deployment = None
+            llm_api_version = None
+
+        monkeypatch.setattr(
+            config_module, "get_settings", lambda: _FakeSettings()
+        )
+        monkeypatch.setattr(
+            factory_module, "get_settings", lambda: _FakeSettings()
+        )
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        factory = LLMFactory()
+        llm = factory.create_chat_model(provider="openai-compatible")
+
+        assert llm.openai_api_base == "http://127.0.0.1:8000/v1"  # type: ignore[attr-defined]
+        assert llm.model_name == "qwen-3.6"  # type: ignore[attr-defined]
+
+    def test_explicit_api_key_overrides_placeholder(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src import config as config_module
+        from src.infrastructure.llm import factory as factory_module
+
+        class _FakeSettings:
+            llm_api_key = None
+            llm_base_url = "http://127.0.0.1:8000/v1"
+            llm_model = "qwen-3.6"
+            llm_endpoint = None
+            llm_deployment = None
+            llm_api_version = None
+
+        monkeypatch.setattr(
+            config_module, "get_settings", lambda: _FakeSettings()
+        )
+        monkeypatch.setattr(
+            factory_module, "get_settings", lambda: _FakeSettings()
+        )
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        factory = LLMFactory()
+        llm = factory.create_chat_model(
+            provider="openai-compatible",
+            api_key="local-secret",
+        )
+        assert llm.openai_api_key.get_secret_value() == "local-secret"  # type: ignore[attr-defined]
+
+    def test_requires_base_url(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src import config as config_module
+        from src.infrastructure.llm import factory as factory_module
+
+        class _FakeSettings:
+            llm_api_key = None
+            llm_base_url = None
+            llm_model = "qwen-3.6"
+            llm_endpoint = None
+            llm_deployment = None
+            llm_api_version = None
+
+        monkeypatch.setattr(
+            config_module, "get_settings", lambda: _FakeSettings()
+        )
+        monkeypatch.setattr(
+            factory_module, "get_settings", lambda: _FakeSettings()
+        )
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        factory = LLMFactory()
+        with pytest.raises(ValueError, match="requires a base_url"):
+            factory.create_chat_model(provider="openai-compatible")

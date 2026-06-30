@@ -28,13 +28,20 @@ class Settings(BaseSettings):
     )
 
     # LLM Defaults
-    llm_provider: Literal["openai", "azure-openai"] = Field(
+    llm_provider: Literal["openai", "azure-openai", "openai-compatible"] = Field(
         default="azure-openai",
         description="LLM provider to use",
     )
     llm_endpoint: str | None = Field(
         default=None,
         description="Azure OpenAI endpoint URL",
+    )
+    llm_base_url: str | None = Field(
+        default=None,
+        description=(
+            "Base URL for OpenAI-compatible providers "
+            "(e.g. http://127.0.0.1:8000/v1 for a local LLM server)."
+        ),
     )
     llm_api_key: str | None = Field(
         default=None,

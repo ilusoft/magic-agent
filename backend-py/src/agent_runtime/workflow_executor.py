@@ -29,6 +29,8 @@ from src.application.agents.run_result import (
     AgentRunResult,
     AgentStepExecutionResult,
     AgentToolCall,
+    LLMCallConfig,
+    _fingerprint_api_key,
 )
 
 logger = structlog.get_logger(__name__)
@@ -112,6 +114,22 @@ def _with_step_error(
         tool_invocations=[*step.tool_invocations, synthetic_tool],
         tool_error_detected=True,
     )
+
+
+def _llm_config_to_snake_dict(config: LLMCallConfig) -> dict[str, Any]:
+    """Return ``config`` as a plain dict with snake_case keys.
+
+    ``LLMCallConfig.from_dict`` consumes snake_case (the dataclass
+    field names) while ``to_dict`` emits camelCase for the wire.
+    The workflow executor persists the snapshot into
+    ``step_outputs`` (an internal dict) and rebuilds it after the
+    loop, so we use snake_case here to keep the round-trip
+    self-consistent with the surrounding fields (``resolved_parameters``
+    / ``parameter_debug`` / ``variable_debug``).
+    """
+    from dataclasses import asdict
+
+    return asdict(config)
 
 
 class WorkflowExecutor:
@@ -324,7 +342,18 @@ class WorkflowExecutor:
         step_index = {s.get("name"): s for s in steps}
 
         variables: dict[str, Any] = {}
+        # Latest-record-per-step view used by the expression
+        # resolver (``step_outputs.X.output``). Mirrors the .NET
+        # ``WorkflowExpressionContext`` semantics where each step
+        # name maps to its most recent execution.
         step_outputs: dict[str, Any] = {}
+        # Append-only history. The diagnostics endpoint and the SSE
+        # ``run-complete`` payload need *every* execution of a step
+        # so a workflow that loops (e.g. the multi-language
+        # translator calling ``general chat agent`` once per
+        # language) shows up once per iteration instead of just
+        # the last call.
+        step_history: list[tuple[str, dict[str, Any]]] = []
         max_iterations = parameters.get("max_iterations", 50) if parameters else 50
         iteration = 0
         current_step_name: str | None = start_step_name
@@ -388,6 +417,15 @@ class WorkflowExecutor:
                 variable_debug: dict[str, Any] | None = None
                 thread_context: dict[str, Any] | None = None
                 tool_invocations: list = []
+                # Built upfront for ``agent`` steps so the diagnostics
+                # endpoint can still see which backend was attempted
+                # when the actual LLM call raises. Stays ``None`` for
+                # non-agent steps (``setVariables``/``echo``).
+                step_llm_config: LLMCallConfig | None = (
+                    self._build_llm_call_config(agent_definition)
+                    if step_type == "agent"
+                    else None
+                )
 
                 try:
                     resolved_step = self._resolve_step(
@@ -424,33 +462,11 @@ class WorkflowExecutor:
 
                 elapsed_ms = int((time.time() - step_start_time) * 1000)
 
-                step_record = {
-                    "type": step_type,
-                    "output": output,
-                    "duration_ms": elapsed_ms,
-                    # Persist the resolved parameters / debug info on
-                    # the step record so the final ``AgentRunResult``
-                    # (and the diagnostics payload) can surface the
-                    # exact strings the resolver produced, including
-                    # the ``${{ lastOutput }}`` substitution.
-                    "resolved_parameters": resolved_parameters,
-                    "parameter_debug": parameter_debug,
-                    "variable_debug": variable_debug,
-                }
-                if error_message is not None:
-                    step_record["error"] = error_message
-                step_outputs[step_name] = step_record
-
-                # Persist the step's output for the next iteration's
-                # ``lastOutput`` and ``runtime_state.output`` lookups.
-                # A failed step surfaces as the error message so the
-                # subsequent step's expressions see something
-                # meaningful instead of a silent ``None``.
-                last_step_output = output if output is not None else error_message
-
-                # Determine next step before publishing the completion
-                # event so the SSE payload can include outcome /
-                # nextStep / endWorkflow.
+                # Determine the routing for this iteration *before*
+                # building the step record so outcome / nextStep /
+                # endWorkflow land in the persisted record (and the
+                # ``/debug`` payload) — not just in the live SSE
+                # ``step-complete`` event.
                 try:
                     next_step_name = self._determine_next_step(
                         step=resolved_step,
@@ -466,12 +482,60 @@ class WorkflowExecutor:
                     if error_message is None:
                         error_message = str(e)
 
-                # Find which outcome fired, if any, by reading the
-                # outcomes list off the resolved step.
                 outcome = _resolve_outcome_name(resolved_step, output, next_step_name)
                 end_workflow = next_step_name is None
-                if next_step_name is not None:
-                    next_step = next_step_name
+                next_step = next_step_name if next_step_name is not None else None
+
+                step_record = {
+                    "type": step_type,
+                    "output": output,
+                    "duration_ms": elapsed_ms,
+                    # Persist the resolved parameters / debug info on
+                    # the step record so the final ``AgentRunResult``
+                    # (and the diagnostics payload) can surface the
+                    # exact strings the resolver produced, including
+                    # the ``${{ lastOutput }}`` substitution.
+                    "resolved_parameters": resolved_parameters,
+                    "parameter_debug": parameter_debug,
+                    "variable_debug": variable_debug,
+                    # Routing metadata. Captured here so the rebuilt
+                    # ``AgentStepExecutionResult`` (the one the
+                    # ``/debug`` endpoint serves) can show which
+                    # outcome fired and which step ran next — not
+                    # just the live ``step-complete`` SSE event.
+                    "outcome": outcome,
+                    "next_step": next_step,
+                    "end_workflow": end_workflow,
+                    # LLM config snapshot (provider/model/endpoint/etc.)
+                    # must round-trip through the diagnostics store
+                    # so the ``/debug`` endpoint and the SSE
+                    # ``run-complete`` payload can both prove which
+                    # backend actually handled the step. Stored in
+                    # snake_case so ``LLMCallConfig.from_dict`` can
+                    # rebuild it back into a typed dataclass after the
+                    # workflow loop; the wire format (camelCase) is
+                    # produced later by ``step.to_dict()``.
+                    "llm_config": (
+                        _llm_config_to_snake_dict(step_llm_config)
+                        if step_llm_config is not None
+                        else None
+                    ),
+                }
+                if error_message is not None:
+                    step_record["error"] = error_message
+                # Latest execution: overwrite for expression resolution.
+                step_outputs[step_name] = step_record
+                # Append-only history: drives the ``/debug`` payload
+                # and the ``run-complete`` SSE event so loops are
+                # visible end-to-end.
+                step_history.append((step_name, step_record))
+
+                # Persist the step's output for the next iteration's
+                # ``lastOutput`` and ``runtime_state.output`` lookups.
+                # A failed step surfaces as the error message so the
+                # subsequent step's expressions see something
+                # meaningful instead of a silent ``None``.
+                last_step_output = output if output is not None else error_message
 
                 # Build the typed step result and forward to the sink.
                 step_result = AgentStepExecutionResult(
@@ -486,6 +550,7 @@ class WorkflowExecutor:
                     next_step=next_step,
                     end_workflow=end_workflow,
                     tool_invocations=tool_invocations,
+                    llm_config=step_llm_config,
                 )
                 if error_message is not None:
                     step_result = _with_step_error(step_result, error_message)
@@ -500,9 +565,9 @@ class WorkflowExecutor:
                 iteration += 1
 
             final_output = ""
-            if step_outputs:
-                last_step_id = list(step_outputs.keys())[-1]
-                final_output = step_outputs[last_step_id].get("output") or ""
+            if step_history:
+                _last_name, _last_record = step_history[-1]
+                final_output = _last_record.get("output") or ""
 
             total_duration_ms = int((time.time() - start_time) * 1000)
             run_status = "completed"
@@ -518,7 +583,18 @@ class WorkflowExecutor:
             await self._mcp_registry.disconnect_all()
 
         step_results: list[AgentStepExecutionResult] = []
-        for step_name, step_data in step_outputs.items():
+        # ``step_history`` is the append-only record of every
+        # execution. Iterating it (instead of ``step_outputs``) keeps
+        # loop iterations visible in the ``/debug`` payload and the
+        # SSE ``run-complete`` event — a step that runs N times in a
+        # loop produces N entries here, in execution order.
+        for step_name, step_data in step_history:
+            llm_config_data = step_data.get("llm_config")
+            llm_config = (
+                LLMCallConfig.from_dict(llm_config_data)
+                if isinstance(llm_config_data, dict)
+                else None
+            )
             step_result = AgentStepExecutionResult(
                 name=step_name,
                 type=step_data.get("type", "unknown"),
@@ -529,6 +605,7 @@ class WorkflowExecutor:
                 outcome=step_data.get("outcome"),
                 next_step=step_data.get("next_step"),
                 end_workflow=step_data.get("end_workflow", False),
+                llm_config=llm_config,
             )
             if "error" in step_data:
                 step_result = _with_step_error(
@@ -586,7 +663,14 @@ class WorkflowExecutor:
             Tuple of (variables, step_outputs)
         """
         variables: dict[str, Any] = {}
+        # Latest-record-per-step view for expression resolution
+        # (``step_outputs.X.output``) — same semantics the streaming
+        # path uses. ``step_history`` is the append-only record the
+        # caller rebuilds into ``AgentStepExecutionResult`` entries;
+        # without it, loop iterations overwrite each other and the
+        # diagnostics payload only contains the last call.
         step_outputs: dict[str, Any] = {}
+        step_history: list[tuple[str, dict[str, Any]]] = []
         current_step_name: str | None = start_step_name
         max_iterations = parameters.get("max_iterations", 50)
         iteration = 0
@@ -642,11 +726,16 @@ class WorkflowExecutor:
                     conversation_id = new_conversation_id
 
                 # Store step output
-                step_outputs[step_name] = {
+                step_record = {
                     "type": step_type,
                     "output": output,
                     "duration_ms": int((time.time() - step_start_time) * 1000),
                 }
+                # Latest execution: overwrite for expression resolution.
+                step_outputs[step_name] = step_record
+                # Append-only history: drives the diagnostics payload
+                # so loop iterations are visible.
+                step_history.append((step_name, step_record))
 
                 # Update context for expressions
                 context = self._build_expression_context(
@@ -675,11 +764,13 @@ class WorkflowExecutor:
                         "error": str(e),
                         "recoverable": True,
                     })
-                step_outputs[step_name] = {
+                error_record = {
                     "type": step_type,
                     "output": None,
                     "error": str(e),
                 }
+                step_outputs[step_name] = error_record
+                step_history.append((step_name, error_record))
 
             # Determine next step based on outcomes - use resolved_step
             current_step_name = self._determine_next_step(
@@ -857,6 +948,71 @@ class WorkflowExecutor:
             step_outputs=step_outputs,
         )
 
+    def _resolve_llm_config(self, agent_definition: dict[str, Any]) -> dict[str, Any]:
+        """Return the fully-resolved LLM config dict for the agent.
+
+        Mirrors the precedence the factory uses: ``agent.llm.*``
+        wins, with the same ``endpoint``/``baseUrl``/``deployment``/
+        ``apiKey``/``apiVersion`` fallbacks lifted to the top of the
+        agent, and ``defaultParameters.{temperature,max_tokens}``
+        flowing through last.
+
+        Kept separate from the actual ``ChatOpenAI`` construction so
+        the diagnostics snapshot can be captured **before** the LLM
+        call — that way the ``/debug`` endpoint still tells
+        operators which backend was attempted when the call itself
+        raises.
+        """
+        llm_config = dict(agent_definition.get("llm", {}) or {})
+        if not llm_config:
+            llm_config = {
+                "provider": agent_definition.get("provider", "azure-openai"),
+                "model": agent_definition.get("model", "gpt-4o"),
+            }
+
+        llm_config.setdefault("endpoint", agent_definition.get("endpoint"))
+        llm_config.setdefault("base_url", agent_definition.get("baseUrl"))
+        llm_config.setdefault("deployment", agent_definition.get("deployment"))
+        llm_config.setdefault("api_key", agent_definition.get("apiKey"))
+        llm_config.setdefault("api_version", agent_definition.get("apiVersion"))
+
+        default_params: dict[str, Any] = {
+            **agent_definition.get("default_parameters", {}),
+            **agent_definition.get("defaultParameters", {}),
+        }
+        for key in ("temperature", "max_tokens", "maxTokens"):
+            if key in default_params and key not in llm_config:
+                llm_config[key] = default_params[key]
+
+        return llm_config
+
+    def _build_llm_call_config(
+        self,
+        agent_definition: dict[str, Any],
+    ) -> LLMCallConfig:
+        """Build an :class:`LLMCallConfig` snapshot for diagnostics.
+
+        ``api_key`` is reduced to a last-4 fingerprint (or ``None``
+        when the agent definition didn't supply one), so the
+        diagnostics endpoint can tell which credential was used
+        without leaking the secret.
+        """
+        llm_config = self._resolve_llm_config(agent_definition)
+        explicit_api_key = llm_config.get("api_key")
+        return LLMCallConfig(
+            provider=llm_config.get("provider", "azure-openai"),
+            model=llm_config.get("model"),
+            endpoint=llm_config.get("endpoint"),
+            base_url=llm_config.get("base_url"),
+            deployment=llm_config.get("deployment"),
+            api_version=llm_config.get("api_version"),
+            temperature=llm_config.get("temperature", 0.7),
+            max_tokens=(
+                llm_config.get("max_tokens") or llm_config.get("maxTokens")
+            ),
+            api_key_fingerprint=_fingerprint_api_key(explicit_api_key),
+        )
+
     async def _execute_step(
         self,
         step: dict[str, Any],
@@ -879,7 +1035,10 @@ class WorkflowExecutor:
             conversation_id: Optional conversation ID for multi-turn conversations
 
         Returns:
-            Tuple of (step output, conversation_id if applicable)
+            Tuple of (step output, conversation_id if applicable).
+            The ``llm_config`` diagnostic snapshot is built by the
+            caller (``execute_stream``) before this call so it
+            survives a failing LLM invocation.
         """
         if step_type == "setVariables":
             result = await self._execute_set_variables(step, variables, context)
@@ -890,9 +1049,10 @@ class WorkflowExecutor:
             return result, conversation_id
 
         elif step_type == "agent":
-            return await self._execute_agent(
+            output, new_conversation_id, _llm_config = await self._execute_agent(
                 step, variables, agent_definition, context, mcp_tools or {}, conversation_id
             )
+            return output, new_conversation_id
 
         else:
             logger.warning("unknown_step_type", step_type=step_type)
@@ -969,7 +1129,7 @@ class WorkflowExecutor:
         context: ExpressionContext,
         mcp_tools: dict[str, list[Any]],
         conversation_id: str | None = None,
-    ) -> tuple[str, str | None]:
+    ) -> tuple[str, str | None, dict[str, Any]]:
         """Execute an agent step (LLM chat).
 
         Args:
@@ -981,7 +1141,11 @@ class WorkflowExecutor:
             conversation_id: Optional conversation ID for multi-turn conversations
 
         Returns:
-            Tuple of (agent response, conversation_id if created/used)
+            Tuple of (agent response, conversation_id if created/used,
+            resolved llm config dict). The dict is currently unused by
+            callers (the diagnostics snapshot is built upfront by
+            ``execute_stream``) but is returned so tests can inspect
+            the resolved values without rebuilding them.
         """
         parameters = step.get("parameters", {})
         system_prompt = parameters.get("systemPrompt", "")
@@ -997,37 +1161,20 @@ class WorkflowExecutor:
             conversation_id=conversation_id,
         )
 
-        # Get LLM config from agent definition
-        llm_config = dict(agent_definition.get("llm", {}) or {})
-        if not llm_config:
-            llm_config = {
-                "provider": agent_definition.get("provider", "azure-openai"),
-                "model": agent_definition.get("model", "gpt-4o"),
-            }
-
-        # Backfill top-level fields used by the JSON format
-        llm_config.setdefault("endpoint", agent_definition.get("endpoint"))
-        llm_config.setdefault("deployment", agent_definition.get("deployment"))
-        llm_config.setdefault("api_key", agent_definition.get("apiKey"))
-        llm_config.setdefault("api_version", agent_definition.get("apiVersion"))
-
-        # Allow defaultParameters (e.g. temperature, max_tokens) to flow into
-        # the LLM client. Accept both the snake_case and camelCase keys for
-        # compatibility with the JSON schema used by the agent definitions.
-        default_params: dict[str, Any] = {
-            **agent_definition.get("default_parameters", {}),
-            **agent_definition.get("defaultParameters", {}),
-        }
-        for key in ("temperature", "max_tokens", "maxTokens"):
-            if key in default_params and key not in llm_config:
-                llm_config[key] = default_params[key]
+        # Get LLM config from agent definition. The diagnostics
+        # snapshot is built by the caller (``execute_stream``) so it
+        # survives a failing LLM call; here we just consume the same
+        # resolved dict to actually construct the chat model.
+        llm_config = self._resolve_llm_config(agent_definition)
+        explicit_api_key = llm_config.get("api_key")
 
         # Create LLM
         llm = self._llm_factory.create_chat_model(
             provider=llm_config.get("provider", "azure-openai"),
             model=llm_config.get("model"),
-            api_key=llm_config.get("api_key"),
+            api_key=explicit_api_key,
             endpoint=llm_config.get("endpoint"),
+            base_url=llm_config.get("base_url"),
             deployment=llm_config.get("deployment"),
             api_version=llm_config.get("api_version"),
             temperature=llm_config.get("temperature", 0.7),
@@ -1094,7 +1241,7 @@ class WorkflowExecutor:
             # Save to store
             await conversation_context.save()
 
-        return response_content, conversation_context.conversation_id
+        return response_content, conversation_context.conversation_id, llm_config
 
     async def _handle_tool_calls(
         self,

@@ -90,6 +90,7 @@ class InMemoryAgentDiagnosticsStore(IAgentDiagnosticsStore):
                 end_workflow=s.end_workflow,
                 tool_invocations=s.tool_invocations,
                 tool_error_detected=s.tool_error_detected,
+                llm_config=s.llm_config,
             )
             for s in run_result.steps
         ]

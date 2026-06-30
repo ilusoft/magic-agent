@@ -5,6 +5,7 @@ import type {
   AgentMessage,
   AgentRunResult,
   AgentStepExecutionResult,
+  LLMCallConfig,
   WorkflowVariableDataType,
 } from "@/types/agents";
 
@@ -199,6 +200,107 @@ function renderResolvedParameters(
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  "azure-openai": "Azure OpenAI",
+  "openai-compatible": "OpenAI-compatible (local)",
+  openai: "OpenAI",
+};
+
+function formatProviderLabel(provider?: string | null) {
+  if (!provider) {
+    return "Unknown provider";
+  }
+  return PROVIDER_LABELS[provider] ?? provider;
+}
+
+function hasLLMConfigContent(config: LLMCallConfig | null | undefined) {
+  if (!config) {
+    return false;
+  }
+  return Boolean(
+    config.provider ||
+      config.model ||
+      config.endpoint ||
+      config.baseUrl ||
+      config.deployment ||
+      config.apiVersion ||
+      config.temperature !== undefined && config.temperature !== null ||
+      config.maxTokens ||
+      config.apiKeyFingerprint
+  );
+}
+
+function renderLLMConfig(llmConfig: AgentStepExecutionResult["llmConfig"]) {
+  if (!hasLLMConfigContent(llmConfig)) {
+    return null;
+  }
+
+  const provider = llmConfig?.provider ?? null;
+  const model = llmConfig?.model ?? null;
+  const endpoint = llmConfig?.endpoint ?? null;
+  const baseUrl = llmConfig?.baseUrl ?? null;
+  const deployment = llmConfig?.deployment ?? null;
+  const apiVersion = llmConfig?.apiVersion ?? null;
+  const apiKeyFingerprint = llmConfig?.apiKeyFingerprint ?? null;
+  const temperature = llmConfig?.temperature;
+  const maxTokens = llmConfig?.maxTokens ?? null;
+
+  const rows: Array<{ label: string; value: string | null }> = [
+    { label: "Provider", value: formatProviderLabel(provider) },
+    { label: "Model", value: model },
+    { label: "Endpoint", value: endpoint },
+    { label: "Base URL", value: baseUrl },
+    { label: "Deployment", value: deployment },
+    { label: "API version", value: apiVersion },
+    {
+      label: "Temperature",
+      value:
+        temperature === undefined || temperature === null
+          ? null
+          : String(temperature),
+    },
+    { label: "Max tokens", value: maxTokens === null ? null : String(maxTokens) },
+    { label: "API key", value: apiKeyFingerprint },
+  ];
+
+  return (
+    <div className="mt-3 space-y-2">
+      <div className="flex items-center justify-between text-xs">
+        <span className="font-semibold uppercase text-foreground/60">
+          LLM Call
+        </span>
+        {provider ? (
+          <span
+            className={clsx(
+              "rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide",
+              provider === "azure-openai" &&
+                "bg-primary/10 text-primary",
+              provider === "openai-compatible" &&
+                "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+              provider === "openai" && "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+            )}
+          >
+            {formatProviderLabel(provider)}
+          </span>
+        ) : null}
+      </div>
+
+      <dl className="grid gap-2 rounded border border-border/40 bg-muted/10 p-2 text-xs text-foreground/80 sm:grid-cols-2">
+        {rows
+          .filter((row) => row.value !== null && row.value !== "")
+          .map((row) => (
+            <div key={row.label} className="min-w-0">
+              <dt className="font-semibold text-foreground/60">{row.label}</dt>
+              <dd className="break-words whitespace-pre-wrap text-foreground/90">
+                {row.value}
+              </dd>
+            </div>
+          ))}
+      </dl>
     </div>
   );
 }
@@ -568,6 +670,8 @@ export function WorkflowExecutionPanel({
                               )}
 
                               {renderVariableDebug(step.variableDebug)}
+
+                              {renderLLMConfig(step.llmConfig)}
 
                               {renderToolInvocations(step)}
                             </li>

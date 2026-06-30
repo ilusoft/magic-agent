@@ -123,6 +123,18 @@ export interface AgentToolCall {
   errorCode?: string | null;
 }
 
+export interface LLMCallConfig {
+  provider?: string | null;
+  model?: string | null;
+  endpoint?: string | null;
+  baseUrl?: string | null;
+  deployment?: string | null;
+  apiVersion?: string | null;
+  temperature?: number | string | null;
+  maxTokens?: number | null;
+  apiKeyFingerprint?: string | null;
+}
+
 export interface AgentStepExecutionResult {
   name: string;
   type: string;
@@ -137,6 +149,7 @@ export interface AgentStepExecutionResult {
   endWorkflow?: boolean;
   toolInvocations?: AgentToolCall[];
   toolErrorDetected?: boolean;
+  llmConfig?: LLMCallConfig | null;
 }
 
 export interface WorkflowVariableDebugInfo {

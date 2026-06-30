@@ -1,9 +1,306 @@
 {
   "agents": [
     {
-      "id": "qualify-pricing-production",
-      "name": "Qualify Pricing Productions",
-      "description": "Agent to assist the qualification of productions",
+      "id": "multi-language-translator-qwen-local",
+      "name": "Multi Language Translator - Qwen Local LLM",
+      "description": "Agent to translate text into multiple languages (local qwen 3.5 via OpenAI-compatible endpoint)",
+      "baseUrl": "http://127.0.0.1:8000/v1",
+      "model": "qwen-3.5",
+      "defaultParameters": {
+        "temperature": "1"
+      },
+      "steps": [
+        {
+          "name": "general chat agent",
+          "type": "agent",
+          "parameters": {
+            "systemPrompt": "You are an expert ${{ var.languages.values[iterator] }} translator agent. You should take any input text provided and translate it. The only expected output is the translated text.",
+            "message": "{{var.originalInput}}"
+          },
+          "variableTypes": {},
+          "provider": "openai-compatible",
+          "options": {},
+          "conversation": {
+            "enabled": true
+          },
+          "tools": [],
+          "stopOnToolError": false,
+          "inputSource": "usePrevious",
+          "outcomes": [
+            {
+              "name": "agent-response",
+              "nextStep": "set-out-vars",
+              "condition": null,
+              "endWorkflow": false,
+              "order": 2
+            },
+            {
+              "name": "check-languages-length",
+              "nextStep": "increment-iterator",
+              "condition": {
+                "expression": "var.iterator < arrayLength( var.languages.values )"
+              },
+              "endWorkflow": false,
+              "order": 1
+            }
+          ],
+          "isStartStep": false
+        },
+        {
+          "name": "set-initial-vars",
+          "type": "setVariables",
+          "parameters": {
+            "originalInput": "{{input}}",
+            "languages": "${{ { \"values\": [\"spanish\", \"french\", \"german\", \"portuguese\"] } }}",
+            "iterator": "0",
+            "translations": "${{ [] }}"
+          },
+          "variableTypes": {
+            "originalInput": "string",
+            "languages": "json",
+            "iterator": "number",
+            "translations": "json"
+          },
+          "provider": "openai-compatible",
+          "options": {},
+          "conversation": null,
+          "tools": [],
+          "stopOnToolError": false,
+          "inputSource": "usePrevious",
+          "outcomes": [
+            {
+              "name": "go-to-chat",
+              "nextStep": "general chat agent",
+              "condition": null,
+              "endWorkflow": false,
+              "order": 1
+            }
+          ],
+          "isStartStep": true
+        },
+        {
+          "name": "set-out-vars",
+          "type": "setVariables",
+          "parameters": {
+            "translations": "${{ addToArray(var.translations, lastOutput) }}",
+            "combinedOutput": "{{var.originalInput}} ==> \n                 \n   - Spanish : \n        ${{ var.translations[0] }}\n   \n   - French :\n        ${{ var.translations[1] }}\n\n   - German :\n        ${{ var.translations[2] }}\n\n   - Portuguese :\n        ${{ var.translations[3] }}"
+          },
+          "variableTypes": {
+            "translations": "json",
+            "combinedOutput": "string"
+          },
+          "provider": "openai-compatible",
+          "options": {},
+          "conversation": null,
+          "tools": [],
+          "stopOnToolError": false,
+          "inputSource": "usePrevious",
+          "outcomes": [
+            {
+              "name": "to-echo",
+              "nextStep": "output-echo",
+              "condition": null,
+              "endWorkflow": false,
+              "order": 1
+            }
+          ],
+          "isStartStep": false
+        },
+        {
+          "name": "output-echo",
+          "type": "echo",
+          "parameters": {
+            "message": "{{var.combinedOutput}}"
+          },
+          "variableTypes": {},
+          "provider": "openai-compatible",
+          "options": {},
+          "conversation": null,
+          "tools": [],
+          "stopOnToolError": false,
+          "inputSource": "usePrevious",
+          "outcomes": [
+            {
+              "name": "finish",
+              "nextStep": null,
+              "condition": null,
+              "endWorkflow": true,
+              "order": 1
+            }
+          ],
+          "isStartStep": false
+        },
+        {
+          "name": "increment-iterator",
+          "type": "setVariables",
+          "parameters": {
+            "iterator": "${{ var.iterator + 1 }}",
+            "translations": "${{ addToArray(var.translations, lastOutput) }}"
+          },
+          "variableTypes": {
+            "iterator": "number",
+            "translations": "json"
+          },
+          "provider": "openai-compatible",
+          "options": {},
+          "conversation": null,
+          "tools": [],
+          "stopOnToolError": false,
+          "inputSource": "usePrevious",
+          "outcomes": [
+            {
+              "name": "continue",
+              "nextStep": "general chat agent",
+              "condition": {
+                "expression": "true"
+              },
+              "endWorkflow": false,
+              "order": 1
+            }
+          ],
+          "isStartStep": false
+        }
+      ],
+      "tools": [],
+      "ViewLayout": {
+        "nodes": {
+          "multi-language-translator-qwen-local-start": {
+            "x": 247,
+            "y": -409,
+            "handles": null
+          },
+          "multi-language-translator-qwen-local-general chat agent": {
+            "x": -114,
+            "y": -81,
+            "handles": null
+          },
+          "multi-language-translator-qwen-local-set-initial-vars": {
+            "x": 173.5,
+            "y": -257,
+            "handles": null
+          },
+          "multi-language-translator-qwen-local-set-out-vars": {
+            "x": -90.5,
+            "y": 63,
+            "handles": null
+          },
+          "multi-language-translator-qwen-local-output-echo": {
+            "x": -90.5,
+            "y": 207,
+            "handles": null
+          },
+          "multi-language-translator-qwen-local-termination-finish": {
+            "x": -25,
+            "y": 343,
+            "handles": null
+          },
+          "multi-language-translator-qwen-local-increment-iterator": {
+            "x": -481,
+            "y": -81,
+            "handles": {
+              "input": "Bottom",
+              "outcomes": "Top",
+              "tools": null
+            }
+          }
+        },
+        "edges": {
+          "multi-language-translator-qwen-local-set-initial-vars-go-to-chat": {
+            "controlPoints": [
+              {
+                "x": 272,
+                "y": -144,
+                "handles": null
+              },
+              {
+                "x": 0,
+                "y": -144,
+                "handles": null
+              }
+            ]
+          },
+          "multi-language-translator-qwen-local-general chat agent-check-languages-length": {
+            "controlPoints": [
+              {
+                "x": -112,
+                "y": 48,
+                "handles": null
+              },
+              {
+                "x": -368,
+                "y": 48,
+                "handles": null
+              }
+            ]
+          },
+          "multi-language-translator-qwen-local-increment-iterator-continue": {
+            "controlPoints": [
+              {
+                "x": -368,
+                "y": -144,
+                "handles": null
+              },
+              {
+                "x": 0,
+                "y": -144,
+                "handles": null
+              }
+            ]
+          },
+          "multi-language-translator-qwen-local-general chat agent-agent-response": {
+            "controlPoints": [
+              {
+                "x": 0,
+                "y": 16,
+                "handles": null
+              }
+            ]
+          },
+          "multi-language-translator-qwen-local-set-out-vars-to-echo": {
+            "controlPoints": [
+              {
+                "x": 0,
+                "y": 144,
+                "handles": null
+              }
+            ]
+          },
+          "multi-language-translator-qwen-local-start-multi-language-translator-qwen-local-set-initial-vars": {
+            "controlPoints": [
+              {
+                "x": 272,
+                "y": -320,
+                "handles": null
+              }
+            ]
+          },
+          "multi-language-translator-qwen-local-output-echo-finish": {
+            "controlPoints": [
+              {
+                "x": 0,
+                "y": 288,
+                "handles": null
+              }
+            ]
+          }
+        },
+        "viewport": {
+          "position": {
+            "x": 760.1335565885195,
+            "y": 453.0676860460579
+          },
+          "zoom": 0.9904646375834294
+        }
+      },
+      "streaming": {
+        "enabled": true,
+        "mode": "sse"
+      }
+    },
+    {
+      "id": "multi-language-translator-azopenai",
+      "name": "Multi Language Translator - Azure Open AI",
+      "description": "Agent to translate text into multiple languages",
       "endpoint": "https://jorge-mafrq1ph-eastus2.cognitiveservices.azure.com/",
       "deployment": "gpt-5-mini",
       "apiVersion": "2024-12-01-preview",
@@ -164,134 +461,67 @@
       ],
       "tools": [],
       "ViewLayout": {
+        "viewport": {
+          "position": {
+            "x": 1126.0202377403405,
+            "y": 321.50301370196763
+          },
+          "zoom": 0.8254030443279651
+        },
         "nodes": {
-          "qualify-pricing-production-start": {
-            "x": 247,
-            "y": -409,
-            "handles": null
+          "multi-language-translator-azopenai-start": {
+            "x": -457,
+            "y": -345
           },
-          "qualify-pricing-production-general chat agent": {
-            "x": -114,
-            "y": -81,
-            "handles": null
+          "multi-language-translator-azopenai-general chat agent": {
+            "x": -546,
+            "y": -49
           },
-          "qualify-pricing-production-set-initial-vars": {
-            "x": 173.5,
-            "y": -257,
-            "handles": null
+          "multi-language-translator-azopenai-set-initial-vars": {
+            "x": -530.5,
+            "y": -209
           },
-          "qualify-pricing-production-set-out-vars": {
-            "x": -90.5,
-            "y": 63,
-            "handles": null
+          "multi-language-translator-azopenai-set-out-vars": {
+            "x": -522.5,
+            "y": 207
           },
-          "qualify-pricing-production-output-echo": {
-            "x": -90.5,
-            "y": 207,
-            "handles": null
+          "multi-language-translator-azopenai-output-echo": {
+            "x": -522.5,
+            "y": 367
           },
-          "qualify-pricing-production-termination-finish": {
-            "x": -25,
-            "y": 343,
-            "handles": null
+          "multi-language-translator-azopenai-termination-finish": {
+            "x": -457,
+            "y": 567
           },
-          "qualify-pricing-production-increment-iterator": {
-            "x": -481,
-            "y": -81,
+          "multi-language-translator-azopenai-increment-iterator": {
+            "x": -897,
+            "y": 79,
             "handles": {
-              "input": "Bottom",
-              "outcomes": "Top",
-              "tools": null
+              "input": "right"
             }
           }
         },
         "edges": {
-          "qualify-pricing-production-set-initial-vars-go-to-chat": {
+          "multi-language-translator-azopenai-increment-iterator-continue": {
             "controlPoints": [
               {
-                "x": 272,
-                "y": -144,
-                "handles": null
+                "x": -784,
+                "y": -96
               },
               {
-                "x": 0,
-                "y": -144,
-                "handles": null
+                "x": -544,
+                "y": -96
               }
             ]
           },
-          "qualify-pricing-production-general chat agent-check-languages-length": {
+          "multi-language-translator-azopenai-general chat agent-check-languages-length": {
             "controlPoints": [
               {
-                "x": -112,
-                "y": 48,
-                "handles": null
-              },
-              {
-                "x": -368,
-                "y": 48,
-                "handles": null
-              }
-            ]
-          },
-          "qualify-pricing-production-increment-iterator-continue": {
-            "controlPoints": [
-              {
-                "x": -368,
-                "y": -144,
-                "handles": null
-              },
-              {
-                "x": 0,
-                "y": -144,
-                "handles": null
-              }
-            ]
-          },
-          "qualify-pricing-production-general chat agent-agent-response": {
-            "controlPoints": [
-              {
-                "x": 0,
-                "y": 16,
-                "handles": null
-              }
-            ]
-          },
-          "qualify-pricing-production-set-out-vars-to-echo": {
-            "controlPoints": [
-              {
-                "x": 0,
-                "y": 144,
-                "handles": null
-              }
-            ]
-          },
-          "qualify-pricing-production-start-qualify-pricing-production-set-initial-vars": {
-            "controlPoints": [
-              {
-                "x": 272,
-                "y": -320,
-                "handles": null
-              }
-            ]
-          },
-          "qualify-pricing-production-output-echo-finish": {
-            "controlPoints": [
-              {
-                "x": 0,
-                "y": 288,
-                "handles": null
+                "x": -464,
+                "y": 112
               }
             ]
           }
-        },
-        "viewport": {
-          "position": {
-            "x": 772.3524251557737,
-            "y": 632.6149624753662,
-            "handles": null
-          },
-          "zoom": 1.336160939750623
         }
       },
       "streaming": {
