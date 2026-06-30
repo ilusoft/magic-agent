@@ -67,44 +67,129 @@ class ToolBuilder:
     def from_mcp_definition(
         tool_def: dict[str, Any],
         mcp_client: Any,
+        mcp_tool_name: str | None = None,
     ) -> Tool | None:
         """Create a Tool from an MCP tool definition.
 
         Args:
             tool_def: Tool definition dict
             mcp_client: MCP client instance
+            mcp_tool_name: Optional real MCP tool name to invoke. When
+                an MCP server exposes multiple tools and the agent
+                definition renames them via ``actions[].parameters.tool``,
+                each LangChain tool must call the underlying server by
+                the *real* tool name (``tavily_search``) even though the
+                LangChain tool is exposed to the model as the renamed
+                name (``web_search``). Falls back to ``tool_def['name']``
+                when omitted for backward compatibility.
 
         Returns:
-            LangChain Tool or None
+            LangChain Tool (StructuredTool under the hood) or None
         """
+        from pydantic import BaseModel, ConfigDict, Field
+
+        from langchain_core.tools import StructuredTool
+
         tool_type = tool_def.get("type", "")
         if tool_type not in ("mcp", "mcp-http"):
             return None
 
         name = tool_def.get("name", "")
         description = tool_def.get("description", f"MCP tool: {name}")
-        allowed_tools = tool_def.get("allowedTools", [])
+        # ``mcp_tool_name`` overrides the name the underlying
+        # ``_run`` closure passes to ``mcp_client.call_tool`` so that
+        # multi-tool MCP servers can be aliased via ``actions`` without
+        # every renamed LangChain tool calling the same underlying tool.
+        invoke_name = mcp_tool_name or name
 
-        async def _run(tool_input: str) -> str:
-            # Parse input and call MCP tool
+        # Permissive input schema. We don't know the MCP tool's exact
+        # ``inputSchema`` until runtime (it's advertised by
+        # ``list_tools()``), so we accept arbitrary kwargs and let
+        # the MCP server do its own validation.
+        #
+        # The schema must declare at least one field: LangChain's
+        # ``StructuredTool._to_args_and_kwargs`` short-circuits to
+        # ``(), {}`` (and drops the entire input) when
+        # ``get_fields(args_schema)`` is empty. With ``extra="allow"``,
+        # the LLM's structured args (e.g. ``{"query": "..."}`` for
+        # ``tavily_search``) are kept as Pydantic "extra" fields and
+        # routed through to the coroutine as ``**kwargs``.
+        #
+        # The legacy ``Tool`` class can't be used here: its
+        # ``_to_args_and_kwargs`` collapses a single-key dict to its
+        # first value, which is the bug that originally surfaced as
+        # empty step output.
+        class _McpToolInput(BaseModel):
+            model_config = ConfigDict(extra="allow")
+            # Wrapper field. The LLM never sets it (it just sends the
+            # MCP tool's structured args directly), but it satisfies
+            # the "at least one declared field" requirement above.
+            # The coroutine falls back to it if a caller does pass
+            # ``{"mcp_call_args": {...}}`` explicitly.
+            mcp_call_args: dict[str, Any] = Field(
+                default_factory=dict,
+                description=(
+                    "Optional wrapper for callers that prefer to send "
+                    "all MCP arguments inside a single field. The LLM "
+                    "tool-calling path doesn't use this; it sends the "
+                    "MCP tool's inputSchema fields directly as kwargs."
+                ),
+            )
+
+        async def _run(mcp_call_args: dict[str, Any], **kwargs: Any) -> str:
+            # The LLM's structured args arrive as ``**kwargs`` (every
+            # field on the input that isn't the declared wrapper).
+            # Fall back to the wrapper for callers that pass
+            # ``{"mcp_call_args": {...}}`` directly.
             import json
 
-            if isinstance(tool_input, str):
-                try:
-                    args = json.loads(tool_input)
-                except json.JSONDecodeError:
-                    args = {"input": tool_input}
+            if kwargs:
+                raw_args = dict(kwargs)
+            elif mcp_call_args:
+                raw_args = dict(mcp_call_args)
             else:
-                args = tool_input
+                raw_args = {}
 
-            result = await mcp_client.call_tool(name, args)
+            # ``StructuredTool`` does JSON-roundtrip the input for some
+            # types, so nested dicts/lists may come back as strings.
+            # Normalise so the MCP server sees proper JSON.
+            args: dict[str, Any] = {}
+            for key, value in raw_args.items():
+                if isinstance(value, str):
+                    try:
+                        args[key] = json.loads(value)
+                        continue
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                args[key] = value
+
+            result = await mcp_client.call_tool(invoke_name, args)
             return str(result)
 
-        return Tool(
+        # ``StructuredTool`` requires a sync ``func`` even when only
+        # the coroutine is exercised; point it at a stub that fails
+        # loudly so any accidental sync invocation surfaces the
+        # misconfiguration instead of silently blocking the loop.
+        def _sync_run(
+            mcp_call_args: dict[str, Any], **_kwargs: Any
+        ) -> str:
+            raise NotImplementedError(
+                "MCP tools are async-only; use ainvoke() or bind_tools() in an async loop."
+            )
+
+        tool = StructuredTool(
             name=name,
             description=description,
-            func=_run,
+            args_schema=_McpToolInput,
+            func=_sync_run,
+            coroutine=_run,
         )
+        # The registry overrides ``.name`` and ``.description`` after
+        # this returns to apply ``actions[].name`` aliases; preserve
+        # them here so the override is a no-op when no alias is
+        # configured (StructuredTool stores the name on the object
+        # the same way legacy ``Tool`` does).
+        return tool
 
     @staticmethod
     def from_definition(

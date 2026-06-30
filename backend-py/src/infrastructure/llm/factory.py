@@ -162,6 +162,12 @@ class LLMFactory:
         Most local servers ignore the API key, so when one is not
         supplied we fall back to a harmless placeholder rather than
         hard-failing.
+
+        When we end up using the placeholder we log a warning so the
+        operator can tell from the logs why the call is about to
+        return ``Invalid API key`` (some local servers — qwen
+        built with an auth shim, gated vLLM, etc. — *do* validate
+        the header and reject anything that isn't the real key).
         """
         if not config.base_url:
             raise ValueError(
@@ -169,8 +175,26 @@ class LLMFactory:
                 "(e.g. http://127.0.0.1:8000/v1)."
             )
 
+        api_key = config.api_key
+        if not api_key:
+            import structlog
+
+            structlog.get_logger(__name__).warning(
+                "openai_compatible_api_key_missing",
+                base_url=config.base_url,
+                model=config.model,
+                hint=(
+                    "No API key was resolved for the openai-compatible "
+                    "provider; substituting 'not-needed'. If the local "
+                    "server returns 401 'Invalid API key', set "
+                    "OPENAI_API_KEY (or LLM_API_KEY) in the environment, "
+                    "or add 'apiKey' to the agent's defaultParameters."
+                ),
+            )
+            api_key = _LOCAL_API_KEY_FALLBACK
+
         kwargs: dict[str, Any] = {
-            "api_key": config.api_key or _LOCAL_API_KEY_FALLBACK,
+            "api_key": api_key,
             "base_url": config.base_url,
             "model": config.model,
             "temperature": config.temperature,

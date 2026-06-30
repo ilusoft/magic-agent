@@ -20,6 +20,12 @@ dependencies = [
     "python-multipart>=0.0.12",
     "structlog>=24.0.0",
     "python-dotenv>=1.0.0",
+    # The MCP Python SDK is required to talk to MCP servers
+    # (e.g. Tavily web search). Marked as a hard dependency so a
+    # bare ``pip install -e backend-py`` is enough to run any agent
+    # that references an ``mcp`` tool; previously it lived in an
+    # optional extra and tool init silently no-op'd on import error.
+    "mcp>=1.0.0",
 ]
 
 [project.optional-dependencies]

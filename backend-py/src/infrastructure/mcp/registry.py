@@ -132,8 +132,14 @@ class McpToolRegistry:
                     tool_name = mcp_tool.name
                     tool_desc = getattr(mcp_tool, "description", f"MCP tool: {tool_name}")
 
-                # Create LangChain tool that calls back to this registry's client
-                langchain_tool = ToolBuilder.from_mcp_definition(tool_def, client)
+                # Create LangChain tool that calls back to this registry's client.
+                # Pass the *discovered* MCP tool name so the underlying
+                # ``_run`` closure invokes the correct server tool even
+                # when ``actions`` rename the LangChain tool that the
+                # model actually sees.
+                langchain_tool = ToolBuilder.from_mcp_definition(
+                    tool_def, client, mcp_tool_name=mcp_tool.name
+                )
                 if langchain_tool:
                     # Update name if action renamed it
                     langchain_tool.name = tool_name

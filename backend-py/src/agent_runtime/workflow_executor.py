@@ -957,6 +957,14 @@ class WorkflowExecutor:
         agent, and ``defaultParameters.{temperature,max_tokens}``
         flowing through last.
 
+        ``apiKey`` (and its ``defaultParameters`` alias) support
+        ``${ENV_VAR}`` placeholders so the secret never has to live in
+        ``agents.json``. When a placeholder resolves to nothing we
+        drop the key entirely so the factory can fall back to its
+        settings/env-var chain instead of substituting a sentinel that
+        real servers (e.g. a local Qwen with auth enabled) would
+        reject as ``Invalid API key``.
+
         Kept separate from the actual ``ChatOpenAI`` construction so
         the diagnostics snapshot can be captured **before** the LLM
         call — that way the ``/debug`` endpoint still tells
@@ -973,7 +981,15 @@ class WorkflowExecutor:
         llm_config.setdefault("endpoint", agent_definition.get("endpoint"))
         llm_config.setdefault("base_url", agent_definition.get("baseUrl"))
         llm_config.setdefault("deployment", agent_definition.get("deployment"))
-        llm_config.setdefault("api_key", agent_definition.get("apiKey"))
+        # Track whether the agent definition explicitly named an
+        # ``apiKey`` so the ``defaultParameters`` fallback can
+        # distinguish "no key declared" from "key declared as null".
+        # ``setdefault`` already populates the key with ``None`` in
+        # both cases, which is too coarse to drive the fallback.
+        if agent_definition.get("apiKey"):
+            llm_config["api_key"] = agent_definition["apiKey"]
+        else:
+            llm_config.setdefault("api_key", None)
         llm_config.setdefault("api_version", agent_definition.get("apiVersion"))
 
         default_params: dict[str, Any] = {
@@ -983,6 +999,38 @@ class WorkflowExecutor:
         for key in ("temperature", "max_tokens", "maxTokens"):
             if key in default_params and key not in llm_config:
                 llm_config[key] = default_params[key]
+
+        # ``apiKey`` is intentionally re-read from defaultParameters
+        # (and the ``api_key`` snake_case alias) so workflow authors
+        # can keep the secret out of the top-level agent definition
+        # via ``"apiKey": "${OPENAI_API_KEY}"``. Resolved through the
+        # shared env-var helper so the same ``$VAR``/``${VAR}`` syntax
+        # used in MCP headers works here too. An unresolved
+        # placeholder must NOT be passed through to the LLM factory —
+        # it would either be rejected by a real auth layer or end up
+        # in the resolved-parameter debug payload as a literal
+        # ``${OPENAI_API_KEY}`` string.
+        if not llm_config.get("api_key"):
+            default_api_key = (
+                default_params.get("apiKey") or default_params.get("api_key")
+            )
+            if default_api_key:
+                from src.lib.security import resolve_env_vars
+
+                resolved = resolve_env_vars(str(default_api_key))
+                if not resolved or resolved == default_api_key:
+                    # Either the placeholder didn't resolve or the
+                    # value was already plain. Only accept the plain
+                    # value as a hardcoded override; drop unresolved
+                    # placeholders so the LLM factory can fall back
+                    # to its own settings/env-var chain instead of
+                    # shipping a literal ``${...}`` to the server.
+                    if "${" in str(default_api_key) or "{" in str(default_api_key):
+                        llm_config["api_key"] = None
+                    else:
+                        llm_config["api_key"] = resolved
+                else:
+                    llm_config["api_key"] = resolved
 
         return llm_config
 
@@ -1217,20 +1265,41 @@ class WorkflowExecutor:
         # Add the current user message
         messages.append(HumanMessage(content=str(resolved_message)))
 
-        # Invoke LLM with or without tools
+        # Invoke LLM with or without tools. The tool-calling path
+        # runs a proper agent loop (see ``_run_agent_loop``) so the
+        # LLM can make multiple rounds of tool calls and still land
+        # on a text response — the previous implementation did
+        # exactly one round of tool calls and then called the LLM
+        # *without* tool bindings for the synthesis step, which made
+        # smaller/quantised local models (e.g. Qwen3.6-35B-A3B) return
+        # an empty ``content`` field and the workflow step produced
+        # no output.
         if langchain_tools:
-            llm_with_tools = llm.bind_tools(langchain_tools)
-            response = await llm_with_tools.ainvoke(messages)
-            # Handle tool calls if present
-            if hasattr(response, "tool_calls") and response.tool_calls:
-                # Execute tool calls and continue conversation
-                response = await self._handle_tool_calls(
-                    response, messages, langchain_tools, llm
-                )
+            response = await self._run_agent_loop(
+                llm=llm,
+                messages=messages,
+                tools=langchain_tools,
+            )
         else:
             response = await llm.ainvoke(messages)
 
         response_content = getattr(response, "content", str(response))
+        if not response_content:
+            # Surface the LLM's actual response so empty output is
+            # diagnosable from the workflow logs (and the
+            # ``/debug`` payload) — without this, the operator sees
+            # an empty step output with no hint about whether the
+            # LLM returned an empty string, a tool call that never
+            # resolved, or a model that simply doesn't support the
+            # tool-calling protocol being used.
+            logger.warning(
+                "agent_step_empty_response",
+                step_name=step.get("name"),
+                response_type=type(response).__name__,
+                tool_calls=(
+                    getattr(response, "tool_calls", None) or None
+                ),
+            )
 
         # Save conversation messages if enabled
         if conversation_context.enabled:
@@ -1243,48 +1312,102 @@ class WorkflowExecutor:
 
         return response_content, conversation_context.conversation_id, llm_config
 
-    async def _handle_tool_calls(
+    async def _run_agent_loop(
         self,
-        response: Any,
+        llm: Any,
         messages: list[Any],
         tools: list[Any],
-        llm: Any,
+        max_iterations: int = 8,
     ) -> Any:
-        """Handle tool calls from LLM response.
+        """Run the LLM in an agent loop until it returns text.
 
-        Args:
-            response: LLM response with tool_calls
-            messages: Conversation messages (modified in place)
-            tools: LangChain tools available
-            llm: LLM instance
+        Some local models (Qwen3.6-35B-A3B-OptiQ-4bit among them)
+        make a tool call, run the tool, and then return *another*
+        tool call on the synthesis turn — sometimes several in a row
+        — before finally producing text. The previous single-round
+        implementation called ``llm.ainvoke`` (without tool bindings!)
+        for the synthesis turn, which both broke tool-aware models
+        *and* dropped the response on the floor if the model still
+        wanted to call a tool.
 
-        Returns:
-            Final response after tool execution
+        This loop uses ``llm_with_tools`` for every turn so the
+        model always sees the tool schema, and iterates until we
+        either get a non-empty ``content`` or hit ``max_iterations``.
+        Each iteration logs what the model did so the operator can
+        see whether the LLM is making progress or stuck in a loop.
         """
-        from langchain_core.messages import AIMessage, ToolMessage
+        from langchain_core.messages import AIMessage
 
-        # Add the AI message with tool calls
-        messages.append(response)
+        llm_with_tools = llm.bind_tools(tools)
 
-        # Execute each tool call
-        for tool_call in response.tool_calls:
+        for iteration in range(max_iterations):
+            response = await llm_with_tools.ainvoke(messages)
+
+            tool_calls = getattr(response, "tool_calls", None) or []
+            content = getattr(response, "content", "") or ""
+
+            logger.debug(
+                "agent_loop_iteration",
+                iteration=iteration,
+                has_content=bool(content),
+                content_preview=content[:200] if content else "",
+                tool_call_names=[tc.get("name") for tc in tool_calls],
+            )
+
+            if not tool_calls:
+                # No tool calls: this is the final response.
+                return response
+
+            # Execute the tool calls and append the results, then
+            # loop again so the model can either chain another tool
+            # call or return a final text response.
+            messages.append(response)
+            await self._execute_tool_calls(
+                tool_calls=tool_calls,
+                tools=tools,
+                messages=messages,
+            )
+
+        logger.warning(
+            "agent_loop_exhausted",
+            max_iterations=max_iterations,
+            hint=(
+                "LLM kept requesting tool calls without producing a "
+                "final text response. Returning the last response "
+                "(which may be empty) so the workflow can continue."
+            ),
+        )
+        return response
+
+    async def _execute_tool_calls(
+        self,
+        tool_calls: list[Any],
+        tools: list[Any],
+        messages: list[Any],
+    ) -> None:
+        """Execute a batch of tool calls and append results to ``messages``.
+
+        Mirrors the body of the previous ``_handle_tool_calls`` but
+        factored out so the agent loop can call it multiple times
+        and so the synthesis step isn't tangled up with execution.
+        """
+        from langchain_core.messages import ToolMessage
+
+        for tool_call in tool_calls:
             tool_name = tool_call.get("name")
             tool_args = tool_call.get("args", {})
 
-            # Find the tool
             tool = next((t for t in tools if t.name == tool_name), None)
             if not tool:
                 logger.warning("tool_not_found", tool_name=tool_name)
                 continue
 
             try:
-                # Invoke the tool
                 if hasattr(tool, "ainvoke"):
                     tool_result = await tool.ainvoke(tool_args)
                 else:
                     tool_result = await tool.invoke(tool_args)
 
-                # Add tool result as ToolMessage
                 messages.append(
                     ToolMessage(
                         content=str(tool_result),
@@ -1299,10 +1422,6 @@ class WorkflowExecutor:
                         tool_call_id=tool_call.get("id"),
                     )
                 )
-
-        # Continue conversation with tool results
-        final_response = await llm.ainvoke(messages)
-        return final_response
 
 
 # Singleton

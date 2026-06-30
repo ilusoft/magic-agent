@@ -5,9 +5,10 @@
       "name": "Multi Language Translator - Qwen Local LLM",
       "description": "Agent to translate text into multiple languages (local qwen 3.5 via OpenAI-compatible endpoint)",
       "baseUrl": "http://127.0.0.1:8000/v1",
-      "model": "qwen-3.5",
+      "model": "Qwen3.6-35B-A3B-OptiQ-4bit",
       "defaultParameters": {
-        "temperature": "1"
+        "temperature": "1",
+        "apiKey": "C2BI6MWzkBS2zvvarw2S"
       },
       "steps": [
         {
@@ -290,6 +291,203 @@
             "y": 453.0676860460579
           },
           "zoom": 0.9904646375834294
+        }
+      },
+      "streaming": {
+        "enabled": true,
+        "mode": "sse"
+      }
+    },
+    {
+      "id": "web-search-tavily-qwen-local",
+      "name": "Web Search Agent - Tavily MCP + Qwen Local LLM",
+      "description": "Answers user questions by searching the web via the Tavily MCP, using the local Qwen LLM as the chat backend.",
+      "provider": "openai-compatible",
+      "baseUrl": "http://127.0.0.1:8000/v1",
+      "model": "Qwen3.6-35B-A3B-OptiQ-4bit",
+      "defaultParameters": {
+        "temperature": "1",
+        "apiKey": "C2BI6MWzkBS2zvvarw2S"
+      },
+      "steps": [
+        {
+          "name": "set-initial-vars",
+          "type": "setVariables",
+          "parameters": {
+            "userQuestion": "{{input}}"
+          },
+          "variableTypes": {
+            "userQuestion": "string"
+          },
+          "provider": "openai-compatible",
+          "options": {},
+          "conversation": null,
+          "tools": [],
+          "stopOnToolError": false,
+          "inputSource": "usePrevious",
+          "outcomes": [
+            {
+              "name": "go-to-search",
+              "nextStep": "web-search-agent",
+              "condition": null,
+              "endWorkflow": false,
+              "order": 1
+            }
+          ],
+          "isStartStep": true
+        },
+        {
+          "name": "web-search-agent",
+          "type": "agent",
+          "parameters": {
+            "systemPrompt": "You are a research assistant with access to the Tavily web search MCP tools. \n\nTo answer the user's question: \n\n(1) call web_search with a focused query to find the most relevant and recent sources\n(2) optionally call fetch_page on the top URLs to read their full content\n(3) synthesize a concise, well-cited answer in plain text. Always prefer authoritative and current sources. \n\nNever invent facts — when the web does not contain an answer, say so explicitly.\nIf you cannot find an answer with a maximum of 2 research calls to the tools don't try any further and consolidate the facts found or ask for clarifications to the user.",
+            "message": "{{var.userQuestion}}"
+          },
+          "conversation": {
+            "enabled": true
+          },
+          "outcomes": [
+            {
+              "name": "answer-ready",
+              "nextStep": "output-echo",
+              "condition": null,
+              "endWorkflow": false,
+              "order": 1
+            }
+          ],
+          "tools": [
+            "tavily-mcp"
+          ]
+        },
+        {
+          "name": "output-echo",
+          "type": "echo",
+          "parameters": {
+            "message": "{{lastOutput}}"
+          },
+          "variableTypes": {},
+          "provider": "openai-compatible",
+          "options": {},
+          "conversation": null,
+          "tools": [],
+          "stopOnToolError": false,
+          "inputSource": "usePrevious",
+          "outcomes": [
+            {
+              "name": "finish",
+              "nextStep": null,
+              "condition": null,
+              "endWorkflow": true,
+              "order": 1
+            }
+          ],
+          "isStartStep": false
+        }
+      ],
+      "tools": [
+        {
+          "id": "tavily-mcp",
+          "type": "mcp",
+          "name": "TavilyWebSearch",
+          "description": "Tavily MCP server providing web search, extract, crawl, and map tools.",
+          "serverUrl": "https://mcp.tavily.com/mcp/?tavilyApiKey=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",
+          "protocol": "auto",
+          "allowedTools": [
+            "tavily_search",
+            "tavily_extract"
+          ],
+          "actions": [
+            {
+              "name": "web_search",
+              "description": "Search the public web for up-to-date information about a query. Use this when you need recent facts, news, or references.",
+              "parameters": {
+                "tool": "tavily_search"
+              }
+            },
+            {
+              "name": "fetch_page",
+              "description": "Fetch and extract the full text content from a list of URLs returned by web_search.",
+              "parameters": {
+                "tool": "tavily_extract"
+              }
+            }
+          ],
+          "forwardAuthorizationHeader": false,
+          "stopOnToolInitError": false
+        }
+      ],
+      "ViewLayout": {
+        "nodes": {
+          "web-search-tavily-qwen-local-start": {
+            "x": 71,
+            "y": -297,
+            "handles": null
+          },
+          "web-search-tavily-qwen-local-set-initial-vars": {
+            "x": 0,
+            "y": -160,
+            "handles": null
+          },
+          "web-search-tavily-qwen-local-web-search-agent": {
+            "x": -17.5,
+            "y": -1,
+            "handles": null
+          },
+          "web-search-tavily-qwen-local-output-echo": {
+            "x": 0,
+            "y": 160,
+            "handles": null
+          },
+          "web-search-tavily-qwen-local-termination-finish": {
+            "x": 71,
+            "y": 327,
+            "handles": null
+          },
+          "web-search-tavily-qwen-local-tool-tavily-mcp": {
+            "x": 340,
+            "y": -1
+          }
+        },
+        "edges": {
+          "web-search-tavily-qwen-local-start-web-search-tavily-qwen-local-set-initial-vars": {
+            "controlPoints": [
+              {
+                "x": 96,
+                "y": -208
+              }
+            ]
+          },
+          "web-search-tavily-qwen-local-set-initial-vars-go-to-search": {
+            "controlPoints": [
+              {
+                "x": 96,
+                "y": -64
+              }
+            ]
+          },
+          "web-search-tavily-qwen-local-web-search-agent-answer-ready": {
+            "controlPoints": [
+              {
+                "x": 96,
+                "y": 112
+              }
+            ]
+          },
+          "web-search-tavily-qwen-local-output-echo-finish": {
+            "controlPoints": [
+              {
+                "x": 96,
+                "y": 256
+              }
+            ]
+          }
+        },
+        "viewport": {
+          "position": {
+            "x": 542.9764055281864,
+            "y": 441.1259958588678
+          },
+          "zoom": 1.2475768020437288
         }
       },
       "streaming": {
