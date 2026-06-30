@@ -1,4 +1,4 @@
-import { Sigma } from "lucide-react";
+import { Clock, Sigma } from "lucide-react";
 import {
   type ChangeEvent,
   type ReactNode,
@@ -23,7 +23,19 @@ interface WorkflowHelperDescriptor {
   returnType: string;
   description?: string | null;
   parameters: WorkflowHelperParameterDescriptor[];
+  category?: string;
 }
+
+// The ``now``/``nowUtc``/``nowLocal``/``today`` family is what
+// the user is most likely to reach for when "grounding" a prompt
+// in the actual run time, so we surface them in a dedicated
+// section above the by-return-type helper list. Names are
+// matched case-insensitively because the Python backend
+// lowercases registry keys (a pre-existing behaviour) while the
+// .NET backend preserves the original case.
+const TIME_HELPER_NAMES: ReadonlySet<string> = new Set(
+  ["now", "nowUtc", "nowLocal", "today"].map((name) => name.toLowerCase()),
+);
 
 function buildHelpersUrl(apiBaseUrl: string): string {
   const normalized = apiBaseUrl.endsWith("/")
@@ -55,6 +67,28 @@ function isWrappedExpression(text: string): boolean {
 function unwrapExpressionEnvelope(text: string): string {
   const match = text.match(/^\s*\${{s*(.*)\s*}}\s*$/s);
   return match ? match[1] ?? "" : text;
+}
+
+// Render a helper as ``name(param: type, param?: type)`` for the
+// picker button so authors can see what the call looks like
+// before inserting it. Falls back to the bare name if the helper
+// has no parameter metadata (e.g. the backend served an older
+// shape without ``parameters``).
+function renderHelperSignature(helper: WorkflowHelperDescriptor): string {
+  if (!helper.parameters || helper.parameters.length === 0) {
+    return helper.name;
+  }
+
+  const params = helper.parameters
+    .map((param) => {
+      const label = param.name || "value";
+      const typeHint = param.type && param.type !== "value" ? `: ${param.type}` : "";
+      const optionalMark = param.optional ? "?" : "";
+      return `${label}${typeHint}${optionalMark}`;
+    })
+    .join(", ");
+
+  return `${helper.name}(${params})`;
 }
 
 export interface ExpressionBuilderButtonProps {
@@ -145,6 +179,19 @@ export function ExpressionBuilderButton({
     );
   }, [helpers]);
 
+  // The current-time helpers (``now``/``nowUtc``/``nowLocal``/``today``)
+  // are surfaced in a dedicated "Current time" section above the
+  // by-return-type list so authors can find them in one click
+  // when they're trying to ground a prompt in the actual run
+  // time. They're also still listed in the by-return-type
+  // sections (they return strings), so this is an additional
+  // entry point rather than a replacement.
+  const timeHelpers = useMemo(
+    () =>
+      helpers.filter((helper) => TIME_HELPER_NAMES.has(helper.name.toLowerCase())),
+    [helpers],
+  );
+
   const helperTypes = useMemo(
     () => Object.keys(helperCategories),
     [helperCategories]
@@ -167,6 +214,11 @@ export function ExpressionBuilderButton({
     : [];
 
   const handleInsertHelper = useCallback((helper: WorkflowHelperDescriptor) => {
+    // Strip the ``: type`` hints for the inserted text — the model
+    // needs ``now('format')`` not ``now(format: string)``. We
+    // still show the type hint in the picker button via
+    // ``renderHelperSignature`` so authors can preview it, but the
+    // actual expression has to be valid for the backend parser.
     const callSignature = `${helper.name}(${helper.parameters
       .map((param) => param.name ?? "value")
       .join(", ")})`;
@@ -372,52 +424,88 @@ export function ExpressionBuilderButton({
                       : "No helpers available."}
                   </p>
                 ) : (
-                  <div className="flex-1 rounded-md border border-border/60 bg-card/60 p-3">
-                    <div className="flex flex-wrap gap-2">
-                      {helperTypes.map((type) => (
-                        <button
-                          key={type}
-                          type="button"
-                          className={`rounded-md border px-2 py-1 text-[11px] font-semibold uppercase ${
-                            activeHelperType === type
-                              ? "border-primary text-primary"
-                              : "border-border/70 text-foreground/70"
-                          }`}
-                          onClick={() => setActiveHelperType(type)}
-                        >
-                          {`Returns ${type}`}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="mt-3 max-h-72 overflow-y-auto space-y-1 pr-1">
-                      {activeHelpers.length === 0 ? (
-                        <p className="text-xs text-foreground/60">
-                          No helpers available for this type.
+                  <div className="flex flex-1 flex-col gap-3">
+                    {timeHelpers.length > 0 ? (
+                      <div className="rounded-md border border-border/60 bg-card/60 p-3">
+                        <div className="flex items-center gap-2">
+                          <Clock
+                            aria-hidden="true"
+                            className="h-3.5 w-3.5 text-foreground/70"
+                          />
+                          <span className="text-xs font-semibold uppercase text-foreground/60">
+                            Current time
+                          </span>
+                        </div>
+                        <p className="mt-1 text-[11px] text-foreground/60">
+                          Insert the current date/time into the expression
+                          so prompts are grounded in the actual run time
+                          instead of the model&apos;s pre-training cutoff.
                         </p>
-                      ) : (
-                        activeHelpers.map((helper) => (
-                          <div key={helper.name}>
-                            <div className="flex flex-wrap gap-1">
-                              <button
-                                type="button"
-                                className="rounded-md border border-border/70 bg-background px-2 py-1 text-[11px] font-semibold text-foreground/80 hover:bg-muted my-1"
-                                onClick={() => handleInsertHelper(helper)}
-                                title={
-                                  helper.description ?? `Insert ${helper.name}`
-                                }
-                              >
-                                {helper.name}
-                              </button>
-                              {helper.description ? (
-                                <p className="ml-4 text-[11px] text-foreground/60 py-2">
-                                  {helper.description}
-                                </p>
-                              ) : null}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {timeHelpers.map((helper) => (
+                            <button
+                              key={helper.name}
+                              type="button"
+                              onClick={() => handleInsertHelper(helper)}
+                              title={
+                                helper.description ?? `Insert ${helper.name}`
+                              }
+                              className="rounded-md border border-border/70 bg-background px-2 py-1 text-[11px] font-semibold text-foreground/80 hover:bg-muted"
+                            >
+                              {renderHelperSignature(helper)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="flex-1 rounded-md border border-border/60 bg-card/60 p-3">
+                      <div className="flex flex-wrap gap-2">
+                        {helperTypes.map((type) => (
+                          <button
+                            key={type}
+                            type="button"
+                            className={`rounded-md border px-2 py-1 text-[11px] font-semibold uppercase ${
+                              activeHelperType === type
+                                ? "border-primary text-primary"
+                                : "border-border/70 text-foreground/70"
+                            }`}
+                            onClick={() => setActiveHelperType(type)}
+                          >
+                            {`Returns ${type}`}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="mt-3 max-h-72 overflow-y-auto space-y-1 pr-1">
+                        {activeHelpers.length === 0 ? (
+                          <p className="text-xs text-foreground/60">
+                            No helpers available for this type.
+                          </p>
+                        ) : (
+                          activeHelpers.map((helper) => (
+                            <div key={helper.name}>
+                              <div className="flex flex-wrap gap-1">
+                                <button
+                                  type="button"
+                                  className="rounded-md border border-border/70 bg-background px-2 py-1 text-[11px] font-semibold text-foreground/80 hover:bg-muted my-1"
+                                  onClick={() => handleInsertHelper(helper)}
+                                  title={
+                                    helper.description ?? `Insert ${helper.name}`
+                                  }
+                                >
+                                  {renderHelperSignature(helper)}
+                                </button>
+                                {helper.description ? (
+                                  <p className="ml-4 text-[11px] text-foreground/60 py-2">
+                                    {helper.description}
+                                  </p>
+                                ) : null}
+                              </div>
                             </div>
-                          </div>
-                        ))
-                      )}
+                          ))
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}

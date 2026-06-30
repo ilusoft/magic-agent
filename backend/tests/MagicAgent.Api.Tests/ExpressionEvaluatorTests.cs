@@ -283,6 +283,134 @@ public class ExpressionEvaluatorTests
     }
 
     [Fact]
+    public void NowHelper_ReturnsParseableUtcIsoString()
+    {
+        var result = DateWorkflowHelpers.Now(string.Empty);
+
+        // The default template is round-trip 'O' which produces a
+        // string ``DateTimeOffset.Parse`` accepts back. The whole
+        // point of the helper is that the value tracks the host's
+        // wall clock — a frozen-constant regression would surface
+        // here as a parse failure or an obviously old timestamp.
+        var parsed = DateTimeOffset.Parse(
+            result,
+            System.Globalization.CultureInfo.InvariantCulture);
+        parsed.Offset.Should().Be(TimeSpan.Zero);
+        // Within 60 s of "now" is a generous bound that still
+        // catches a frozen / hard-coded value.
+        (DateTimeOffset.UtcNow - parsed).Duration().Should().BeLessThan(TimeSpan.FromSeconds(60));
+    }
+
+    [Fact]
+    public void NowHelper_RespectsFormatArgument()
+    {
+        var result = DateWorkflowHelpers.Now("yyyy-MM-dd");
+
+        result.Should().MatchRegex(@"^\d{4}-\d{2}-\d{2}$");
+    }
+
+    [Fact]
+    public void NowUtcHelper_BehavesAsAliasForNow()
+    {
+        // Both helpers must produce parseable UTC ISO strings.
+        // They need not be byte-identical (call ordering can
+        // produce sub-millisecond drift), but the parsed offsets
+        // must be zero and the two values must agree to within
+        // one second — the same property the Python tests check.
+        var now = DateTimeOffset.Parse(
+            DateWorkflowHelpers.Now(string.Empty),
+            System.Globalization.CultureInfo.InvariantCulture);
+        var nowUtc = DateTimeOffset.Parse(
+            DateWorkflowHelpers.NowUtc(string.Empty),
+            System.Globalization.CultureInfo.InvariantCulture);
+
+        now.Offset.Should().Be(TimeSpan.Zero);
+        nowUtc.Offset.Should().Be(TimeSpan.Zero);
+        (now - nowUtc).Duration().Should().BeLessThan(TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
+    public void NowLocalHelper_ReflectsHostTimezone()
+    {
+        var result = DateWorkflowHelpers.NowLocal(string.Empty);
+        var parsed = DateTimeOffset.Parse(
+            result,
+            System.Globalization.CultureInfo.InvariantCulture);
+
+        if (TimeZoneInfo.Local.GetUtcOffset(DateTimeOffset.Now) == TimeSpan.Zero)
+        {
+            // The host is UTC — the helper's output coincides
+            // with ``Now()`` and there's nothing meaningful to
+            // assert beyond the parse round-trip.
+            return;
+        }
+
+        parsed.Offset.Should().Be(TimeZoneInfo.Local.GetUtcOffset(parsed));
+        parsed.Offset.Should().NotBe(TimeSpan.Zero);
+    }
+
+    [Fact]
+    public void NowLocalHelper_RespectsFormatArgument()
+    {
+        var result = DateWorkflowHelpers.NowLocal("yyyy/MM/dd HH:mm");
+
+        result.Should().MatchRegex(@"^\d{4}/\d{2}/\d{2} \d{2}:\d{2}$");
+    }
+
+    [Fact]
+    public void TodayHelper_ReturnsLocalDateAsYyyyMmDd()
+    {
+        var result = DateWorkflowHelpers.Today();
+
+        result.Should().MatchRegex(@"^\d{4}-\d{2}-\d{2}$");
+        // Must agree with ``nowLocal('yyyy-MM-dd')`` — not, say,
+        // a baked-in UTC date.
+        DateWorkflowHelpers.NowLocal("yyyy-MM-dd").Should().Be(result);
+    }
+
+    [Fact]
+    public void Evaluator_EvaluatesNowHelper()
+    {
+        // End-to-end: the expression parser + evaluator must
+        // resolve ``now()`` to a real, parseable ISO string.
+        var context = CreateContext();
+
+        var result = Evaluator.Evaluate("now()", context);
+
+        result.Success.Should().BeTrue(result.ErrorMessage ?? string.Empty);
+        result.Value.Kind.Should().Be(WorkflowExpressionValueKind.String);
+        var parsed = DateTimeOffset.Parse(
+            result.Value.StringValue!,
+            System.Globalization.CultureInfo.InvariantCulture);
+        parsed.Offset.Should().Be(TimeSpan.Zero);
+    }
+
+    [Fact]
+    public void Evaluator_EvaluatesTodayHelper()
+    {
+        var context = CreateContext();
+
+        var result = Evaluator.Evaluate("today()", context);
+
+        result.Success.Should().BeTrue(result.ErrorMessage ?? string.Empty);
+        result.Value.Kind.Should().Be(WorkflowExpressionValueKind.String);
+        result.Value.StringValue.Should().MatchRegex(@"^\d{4}-\d{2}-\d{2}$");
+    }
+
+    [Fact]
+    public void HelperRegistry_ExposesNowFamily()
+    {
+        // The frontend helper picker reads from this registry;
+        // the new helpers must be discoverable alongside the
+        // other date helpers so the UI surfaces them.
+        var descriptorNames = HelperRegistry.GetDescriptors()
+            .Select(d => d.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        descriptorNames.Should().Contain(new[] { "now", "nowUtc", "nowLocal", "today" });
+    }
+
+    [Fact]
     public void Evaluator_EvaluatesCompoundBooleanExpressions()
     {
         var variables = new Dictionary<string, WorkflowExpressionValue>(StringComparer.OrdinalIgnoreCase)

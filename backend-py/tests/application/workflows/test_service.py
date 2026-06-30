@@ -225,3 +225,186 @@ class TestResolvePlaceholders:
         result = service.resolve_placeholders("plain text only", context)
         assert result.resolved == "plain text only"
         assert result.placeholders == []
+
+
+class TestDatePresets:
+    """Regression tests for the date-preset keywords the resolver
+    honours inside the legacy ``{{ … }}`` syntax.
+
+    The preset layer exists so that workflow authors who reach
+    for ``{{ today }}`` or ``{{ dd-mm-yyyy }}`` get a working
+    current-date substitution even though the legacy syntax
+    normally only handles variable lookups. Without the
+    preset, an author who wrote ``{{ today }}`` would see
+    an empty string and conclude (correctly!) that the
+    feature doesn't work.
+    """
+
+    def test_today_keyword_resolves_to_local_date(
+        self, service: WorkflowExpressionService
+    ) -> None:
+        from datetime import datetime, timezone
+
+        result = service.resolve_placeholders(
+            "{{ today }}", ExpressionContext()
+        )
+        expected = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
+        assert result.resolved == expected
+
+    def test_today_keyword_is_case_insensitive(
+        self, service: WorkflowExpressionService
+    ) -> None:
+        result = service.resolve_placeholders(
+            "{{ TODAY }}", ExpressionContext()
+        )
+        # The exact date isn't asserted (clock may tick over
+        # between this and the previous test) — only that the
+        # preset *resolved* rather than returning empty.
+        assert result.resolved
+        assert "T" not in result.resolved  # a date, not a datetime
+
+    def test_now_keyword_returns_iso_datetime(
+        self, service: WorkflowExpressionService
+    ) -> None:
+        result = service.resolve_placeholders(
+            "{{ now }}", ExpressionContext()
+        )
+        # ISO 8601 with timezone offset or Z.
+        assert "T" in result.resolved
+        assert "+" in result.resolved[10:] or "Z" in result.resolved
+
+    def test_dd_mm_yyyy_placeholder_resolves(
+        self, service: WorkflowExpressionService
+    ) -> None:
+        """The exact placeholder the user pasted into the
+        web-search agent's system prompt. Without the preset
+        layer this would have evaluated as a variable lookup,
+        missed, and produced the literal string the LLM
+        then hallucinated against.
+        """
+        from datetime import datetime, timezone
+
+        result = service.resolve_placeholders(
+            "{{ dd-mm-yyyy }}", ExpressionContext()
+        )
+        expected = datetime.now(timezone.utc).astimezone().strftime("%d-%m-%Y")
+        assert result.resolved == expected
+
+    @pytest.mark.parametrize(
+        "placeholder, expected_format",
+        [
+            ("{{ yyyy-mm-dd }}", "%Y-%m-%d"),
+            ("{{ dd-mm-yyyy }}", "%d-%m-%Y"),
+            ("{{ mm/dd/yyyy }}", "%m/%d/%Y"),
+            ("{{ dd/mm/yyyy }}", "%d/%m/%Y"),
+            ("{{ yyyy/mm/dd }}", "%Y/%m/%d"),
+        ],
+    )
+    def test_format_placeholder_resolves_to_today(
+        self,
+        service: WorkflowExpressionService,
+        placeholder: str,
+        expected_format: str,
+    ) -> None:
+        from datetime import datetime, timezone
+
+        result = service.resolve_placeholders(placeholder, ExpressionContext())
+        expected = datetime.now(timezone.utc).astimezone().strftime(expected_format)
+        assert result.resolved == expected
+
+    def test_unknown_preset_falls_through_to_normal_lookup(
+        self, service: WorkflowExpressionService
+    ) -> None:
+        """A non-preset key (``foo``) must NOT be hijacked by
+        the preset layer — it should still go through the
+        normal variable lookup. The preset is purely
+        additive.
+        """
+        context = ExpressionContext(variables={"foo": "bar"})
+        result = service.resolve_placeholders("{{ foo }}", context)
+        assert result.resolved == "bar"
+
+    def test_mixed_preset_and_expression(
+        self, service: WorkflowExpressionService
+    ) -> None:
+        """The preset and expression syntaxes can coexist in
+        the same template — the preset handles the legacy
+        ``{{ today }}`` placeholder while ``${{ now('…') }}``
+        runs the full expression evaluator.
+        """
+        from datetime import datetime, timezone
+
+        result = service.resolve_placeholders(
+            "Today: {{ today }} (ISO: ${{ now() }})", ExpressionContext()
+        )
+        # ``Today: YYYY-MM-DD`` followed by an ISO datetime.
+        expected_date = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
+        assert result.resolved.startswith(f"Today: {expected_date} (ISO: ")
+        assert "T" in result.resolved
+
+
+class TestNowHelperFormatAliases:
+    """The ``now()`` / ``nowUtc()`` / ``nowLocal()`` helpers accept
+    both Python ``strftime`` codes and the friendlier
+    ``dd-mm-yyyy`` / ``yyyy-mm-dd`` tokens that humans actually
+    write. The aliases are what the user's web-search agent
+    relies on — without them, ``strftime("dd-mm-yyyy")``
+    returns the literal string and the LLM hallucinates
+    against it.
+    """
+
+    @pytest.mark.parametrize(
+        "helper_name",
+        ["now", "nowUtc", "nowLocal"],
+    )
+    def test_dd_mm_yyyy_alias_is_translated(
+        self, helper_name: str
+    ) -> None:
+        from src.application.workflows.expressions.helpers import DateHelpers
+        from datetime import datetime, timezone
+
+        result = getattr(DateHelpers, helper_name)("dd-mm-yyyy")
+        expected = datetime.now(timezone.utc).astimezone().strftime("%d-%m-%Y")
+        assert result == expected
+
+    @pytest.mark.parametrize(
+        "helper_name",
+        ["now", "nowUtc", "nowLocal"],
+    )
+    def test_yyyy_mm_dd_alias_is_translated(
+        self, helper_name: str
+    ) -> None:
+        from src.application.workflows.expressions.helpers import DateHelpers
+        from datetime import datetime, timezone
+
+        result = getattr(DateHelpers, helper_name)("yyyy-mm-dd")
+        expected = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
+        assert result == expected
+
+    def test_strftime_passthrough_is_preserved(
+        self,
+    ) -> None:
+        """Strings that already contain ``%`` are strftime
+        templates and must be passed through unchanged — the
+        alias only fires for bare tokens.
+        """
+        from src.application.workflows.expressions.helpers import DateHelpers
+        from datetime import datetime, timezone
+
+        result = DateHelpers.now("%d-%m-%Y")
+        expected = datetime.now(timezone.utc).astimezone().strftime("%d-%m-%Y")
+        assert result == expected
+
+    def test_unknown_format_passes_through_unchanged(
+        self,
+    ) -> None:
+        """A format string that isn't a recognised alias and
+        isn't a strftime template is left to ``strftime`` to
+        interpret (which may return it as a literal if no
+        ``%`` codes are present). We don't want the alias
+        layer to silently rewrite arbitrary strings.
+        """
+        from src.application.workflows.expressions.helpers import DateHelpers
+
+        result = DateHelpers.now("not-a-real-format")
+        assert result == "not-a-real-format"

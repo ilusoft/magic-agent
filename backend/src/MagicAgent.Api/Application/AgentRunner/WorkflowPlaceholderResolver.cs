@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -150,6 +151,20 @@ internal static partial class WorkflowPlaceholderResolver
             {
                 RecordPlaceholder(expression);
                 return parameterValue ?? string.Empty;
+            }
+
+            // Date presets (``{{ today }}``, ``{{ dd-mm-yyyy }}``,
+            // etc.) sit between the special identifiers above and
+            // the variable lookup below. They exist so workflow
+            // authors who reach for the legacy ``{{ … }}`` syntax
+            // still get a working current-date substitution — the
+            // model was previously hallucinating against the
+            // literal ``dd-mm-yyyy`` placeholder text because the
+            // legacy path didn't know what to do with it.
+            if (TryResolveDatePreset(expression, out var presetValue))
+            {
+                RecordPlaceholder(expression);
+                return presetValue;
             }
 
             var originalExpression = expression;
@@ -426,6 +441,81 @@ internal static partial class WorkflowPlaceholderResolver
         {
             value = parameterValue ?? string.Empty;
             return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Try to resolve a small set of date-preset keywords that
+    /// authors reach for inside the legacy <c>{{ … }}</c> syntax
+    /// (e.g. <c>{{ today }}</c>, <c>{{ dd-mm-yyyy }}</c>). Mirrors
+    /// the Python backend's <c>_resolve_date_preset</c> so a
+    /// workflow authored against either backend behaves
+    /// identically.
+    /// </summary>
+    /// <remarks>
+    /// The preset layer is purely additive — anything that
+    /// isn't a recognised preset falls through to the normal
+    /// variable lookup. We also accept the human-friendly format
+    /// tokens <c>dd-mm-yyyy</c>, <c>yyyy-mm-dd</c>, <c>mm/dd/yyyy</c>,
+    /// etc., which the <c>now()</c> helper also accepts. The .NET
+    /// <see cref="DateTimeOffset.ToString(string)"/> method
+    /// understands these natively, so no alias translation is
+    /// required.
+    /// </remarks>
+    private static bool TryResolveDatePreset(string expression, out string value)
+    {
+        value = string.Empty;
+        if (string.IsNullOrWhiteSpace(expression))
+        {
+            return false;
+        }
+
+        var trimmed = expression.Trim();
+        var localNow = DateTimeOffset.Now;
+        var utcNow = DateTimeOffset.UtcNow;
+
+        switch (trimmed.ToLowerInvariant())
+        {
+            // Word presets
+            case "today":
+            case "currentdate":
+                value = localNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                return true;
+            case "now":
+            case "nowutc":
+            case "currentdatetime":
+                value = utcNow.ToString("O", CultureInfo.InvariantCulture);
+                return true;
+            case "nowlocal":
+                value = localNow.ToString("O", CultureInfo.InvariantCulture);
+                return true;
+
+            // Common date-format placeholders. The agent
+            // author wrote ``Current Date Time : dd-mm-yyyy``
+            // into the web-search agent's system prompt and the
+            // model was hallucinating against the literal
+            // string; the preset now turns the placeholder into
+            // a working current-date substitution.
+            case "dd-mm-yyyy":
+                value = localNow.ToString("dd-MM-yyyy", CultureInfo.InvariantCulture);
+                return true;
+            case "yyyy-mm-dd":
+                value = localNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                return true;
+            case "mm-dd-yyyy":
+                value = localNow.ToString("MM-dd-yyyy", CultureInfo.InvariantCulture);
+                return true;
+            case "dd/mm/yyyy":
+                value = localNow.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+                return true;
+            case "yyyy/mm/dd":
+                value = localNow.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture);
+                return true;
+            case "mm/dd/yyyy":
+                value = localNow.ToString("MM/dd/yyyy", CultureInfo.InvariantCulture);
+                return true;
         }
 
         return false;

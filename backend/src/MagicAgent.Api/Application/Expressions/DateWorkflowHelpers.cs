@@ -152,6 +152,59 @@ public static class DateWorkflowHelpers
         };
     }
 
+    // ------------------------------------------------------------------
+    // "Current time" helpers. The expression system previously had no
+    // way to ground a workflow in the actual run time — every date
+    // value had to be either hard-coded in the agent JSON or carried
+    // in through ``input``/``variables``. That made prompts that said
+    // "today is {{ ... }}" drift further from reality on every run,
+    // because the LLM had to fall back on its pre-training knowledge
+    // cutoff. The helpers below are evaluated against the host's wall
+    // clock at the moment the expression is evaluated, so
+    // ``{{ now() }}`` always reflects the moment the workflow is
+    // actually running. Mirrors the Python backend's
+    // ``now/nowUtc/nowLocal/today`` helpers so a workflow authored
+    // against either backend behaves identically.
+    // ------------------------------------------------------------------
+
+    [WorkflowHelper("now", ReturnType = WorkflowExpressionValueKind.String, Description = "Returns the current UTC date/time as an ISO 8601 string. Use to ground a prompt in the actual run time instead of the model's pre-training cutoff.")]
+    [WorkflowHelperParameter("format", Description = "Optional .NET date format string (defaults to round-trip 'O').", IsOptional = true)]
+    public static string Now(string format)
+    {
+        return FormatNow(DateTimeOffset.UtcNow, format);
+    }
+
+    [WorkflowHelper("nowUtc", ReturnType = WorkflowExpressionValueKind.String, Description = "Alias for ``now()`` — returns the current UTC date/time as an ISO 8601 string.")]
+    [WorkflowHelperParameter("format", Description = "Optional .NET date format string.", IsOptional = true)]
+    public static string NowUtc(string format)
+    {
+        return FormatNow(DateTimeOffset.UtcNow, format);
+    }
+
+    [WorkflowHelper("nowLocal", ReturnType = WorkflowExpressionValueKind.String, Description = "Returns the current local date/time as an ISO 8601 string with the host's timezone offset (e.g. '2026-06-30T19:03:58-04:00').")]
+    [WorkflowHelperParameter("format", Description = "Optional .NET date format string.", IsOptional = true)]
+    public static string NowLocal(string format)
+    {
+        // ``DateTimeOffset.Now`` already carries the host's local
+        // offset, so we don't have to call ``TimeZoneInfo.Local``
+        // ourselves — the resulting ISO string includes the
+        // correct offset (which is what downstream string-typed
+        // helpers like ``dateAdd`` expect).
+        return FormatNow(DateTimeOffset.Now, format);
+    }
+
+    [WorkflowHelper("today", ReturnType = WorkflowExpressionValueKind.String, Description = "Returns today's local date as 'yyyy-MM-dd'. Convenience wrapper for grounding a prompt in 'today's date'.")]
+    public static string Today()
+    {
+        return DateTimeOffset.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    }
+
+    private static string FormatNow(DateTimeOffset value, string? format)
+    {
+        var template = string.IsNullOrWhiteSpace(format) ? "O" : format;
+        return value.ToString(template, CultureInfo.InvariantCulture);
+    }
+
     private static DateTimeOffset ParseDate(string value, string parameterName)
     {
         if (string.IsNullOrWhiteSpace(value))

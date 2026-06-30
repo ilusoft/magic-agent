@@ -6,11 +6,12 @@ Each helper is decorated with @workflow_helper and its parameters with @workflow
 
 from __future__ import annotations
 
+import inspect
 import math
 import re
 from datetime import datetime, timezone, timedelta
 from functools import wraps
-from typing import Any, Callable, get_type_hints
+from typing import Any, Callable, Union as typing_union, get_type_hints
 
 from pydantic import BaseModel, Field
 
@@ -19,17 +20,27 @@ class WorkflowHelperParam(BaseModel):
     """Metadata for a helper function parameter."""
 
     name: str
+    type: str = "string"
     description: str | None = None
     optional: bool = False
     default: Any = None
 
 
 class WorkflowHelperDescriptor(BaseModel):
-    """Metadata for a helper function."""
+    """Metadata for a helper function.
+
+    ``returnType`` mirrors the ``.NET`` ``WorkflowHelperDescriptor``
+    contract (lowercased kind: ``string``, ``number``, ``boolean``,
+    ``json``, ``datetime``, ``value``) so the frontend's
+    ``/api/workflows/helpers`` consumer — the expression-builder
+    dialog — can group helpers by return type the same way
+    regardless of which backend the workflow is using.
+    """
 
     name: str
     description: str | None = None
     category: str
+    returnType: str = "value"
     parameters: list[WorkflowHelperParam]
     examples: list[str] = Field(default_factory=list)
 
@@ -54,8 +65,102 @@ def workflow_helper(
         fn._helper_name = name or fn.__name__  # type: ignore[attr-defined]
         fn._helper_category = category  # type: ignore[attr-defined]
         fn._helper_description = description  # type: ignore[attr-defined]
+        # Stash the return type as a lowercase kind string so the
+        # registry can publish it on the descriptor (the frontend
+        # uses it to group helpers by return type in the
+        # expression-builder dialog). We resolve the annotation
+        # eagerly here so a later ``get_type_hints`` call doesn't
+        # fail on helpers defined inside a function — see
+        # ``WorkflowHelperRegistry._resolve_type_label``.
+        fn._helper_return_type = _resolve_type_label(
+            _safe_return_annotation(fn)
+        )  # type: ignore[attr-defined]
         return fn
     return decorator
+
+
+def _safe_return_annotation(fn: Callable[..., Any]) -> Any:
+    """Return the helper's return annotation, falling back to ``None``.
+
+    ``inspect.signature(fn).__wrapped__`` doesn't exist on plain
+    functions, so we go through ``get_type_hints``'s graceful
+    fallback path: try the real annotation, otherwise ``None``.
+    """
+    try:
+        hints = get_type_hints(fn)
+    except Exception:
+        return None
+    return hints.get("return")
+
+
+def _resolve_type_label(annotation: Any) -> str:
+    """Translate a Python type annotation into a frontend-friendly
+    lowercase kind string.
+
+    Mirrors the kind vocabulary the .NET ``WorkflowHelperDescriptor``
+    exposes so the dialog renders both backends consistently:
+    ``string``, ``number``, ``boolean``, ``json``, ``datetime``,
+    and the catch-all ``value``. ``None`` (no annotation) and
+    anything we don't recognise collapse to ``value`` so the
+    frontend's ``returnType || "value"`` fallback still works.
+    """
+    if annotation is None:
+        return "value"
+
+    # ``str`` annotations are a special case: Pydantic + FastAPI
+    # forward-ref strings from ``__future__ import annotations``
+    # modules. We can't import the real types, so we trust the
+    # name in that case.
+    if isinstance(annotation, str):
+        normalised = annotation.lower()
+        for kind in ("string", "number", "boolean", "json", "datetime", "value"):
+            if kind in normalised:
+                return kind
+        return "value"
+
+    # Unwrap ``Optional[X]`` / ``X | None`` / ``Union[X, Y]`` so
+    # the inner type drives the label.
+    #
+    # PEP 604 (``X | Y`` syntax, Python 3.10+) produces a
+    # ``types.UnionType`` whose ``__origin__`` is ``None`` — it
+    # has to be detected by the concrete class, not by
+    # ``__origin__`` like the older ``typing.Union`` form. We
+    # also fall back to ``__origin__`` so the typing-module
+    # variant still works on 3.9.
+    import types as _types
+
+    is_union = isinstance(annotation, _types.UnionType) or getattr(
+        annotation, "__origin__", None
+    ) is typing_union
+    if is_union:
+        args = [a for a in getattr(annotation, "__args__", ()) if a is not type(None)]
+        if not args:
+            return "value"
+        # ``Union`` / ``Optional`` of several non-None types —
+        # fall back to "value" rather than guess.
+        if len(args) > 1:
+            return "value"
+        return _resolve_type_label(args[0])
+
+    if annotation is str:
+        return "string"
+    if annotation in (int, float):
+        return "number"
+    if annotation is bool:
+        return "boolean"
+    if annotation is datetime:
+        return "datetime"
+    if annotation in (list, dict):
+        return "json"
+
+    # Be tolerant of typing aliases like ``list[str]`` that didn't
+    # match the above ``__origin__`` branch (e.g. on older Python
+    # versions where ``list[str]`` isn't a ``types.GenericAlias``).
+    name = getattr(annotation, "__name__", str(annotation)).lower()
+    for kind in ("string", "number", "boolean", "json", "datetime", "value"):
+        if kind in name:
+            return kind
+    return "value"
 
 
 def workflow_helper_param(
@@ -124,15 +229,31 @@ class WorkflowHelperRegistry:
         """
         descriptors = []
         for name, fn in self._helpers.items():
-            params = []
+            params: list[WorkflowHelperParam] = []
             if hasattr(fn, "_helper_params"):
-                for p in fn._helper_params:
-                    params.append(WorkflowHelperParam(**p))
+                # The ``@workflow_helper_param`` decorator appends in
+                # decorator-application order (i.e. bottom-up), which
+                # is the *reverse* of the function signature. The
+                # frontend expects parameters in signature order so
+                # the type we attach to each one lines up — so we
+                # re-key the decorator list by parameter name and
+                # emit in signature order.
+                decorator_by_name = {p["name"]: p for p in fn._helper_params}
+                param_types = _resolve_parameter_types(fn)
+                signature_params = _safe_parameter_names(fn)
+                for index, param_name in enumerate(signature_params):
+                    payload = dict(decorator_by_name.get(param_name, {"name": param_name}))
+                    payload.setdefault(
+                        "type",
+                        param_types[index] if index < len(param_types) else "string",
+                    )
+                    params.append(WorkflowHelperParam(**payload))
 
             descriptors.append(WorkflowHelperDescriptor(
                 name=name,
                 description=getattr(fn, "_helper_description", None),
                 category=getattr(fn, "_helper_category", "General"),
+                returnType=getattr(fn, "_helper_return_type", "value"),
                 parameters=params,
             ))
 
@@ -179,7 +300,95 @@ class WorkflowHelperRegistry:
         return self._helpers.get(name.lower())
 
 
-# Math helpers
+def _resolve_parameter_types(fn: Callable[..., Any]) -> list[str]:
+    """Return the lowercase kind label for each of ``fn``'s
+    parameters, in declaration order.
+
+    Mirrors ``_resolve_type_label`` so the labels we publish
+    match the ones the .NET ``WorkflowHelperParameterDescriptor``
+    exposes. We resolve annotations lazily (via ``get_type_hints``)
+    so we work with both eagerly-evaluated and forward-reference
+    style annotations.
+    """
+    try:
+        hints = get_type_hints(fn)
+    except Exception:
+        return ["string"] * max(0, _safe_param_count(fn))
+
+    return [
+        _resolve_type_label(hints.get(param_name))
+        for param_name in _safe_parameter_names(fn)
+    ]
+
+
+def _safe_parameter_names(fn: Callable[..., Any]) -> list[str]:
+    try:
+        return list(inspect.signature(fn).parameters)
+    except (TypeError, ValueError):
+        return []
+
+
+def _safe_param_count(fn: Callable[..., Any]) -> int:
+    return len(_safe_parameter_names(fn))
+
+
+# Friendly aliases for the date format strings authors reach for
+# when they don't speak strftime. The .NET side accepts these
+# tokens natively (``ToString("dd-MM-yyyy")`` etc.), so without
+# this map a workflow authored on the .NET backend — or by
+# anyone who writes ``dd-mm-yyyy`` the way they'd write it on a
+# form — would silently return the literal string on Python.
+# Anything already containing ``%`` is treated as a strftime
+# template and passed through unchanged.
+_FRIENDLY_DATE_FORMAT_ALIASES: dict[str, str] = {
+    "dd-mm-yyyy": "%d-%m-%Y",
+    "yyyy-mm-dd": "%Y-%m-%d",
+    "mm-dd-yyyy": "%m-%d-%Y",
+    "dd/mm/yyyy": "%d/%m/%Y",
+    "yyyy/mm/dd": "%Y/%m/%d",
+    "mm/dd/yyyy": "%m/%d/%Y",
+    "hh:mm:ss": "%H:%M:%S",
+    "hh:mm": "%H:%M",
+    "yyyy-mm-ddthh:mm:ss": "%Y-%m-%dT%H:%M:%S",
+    "iso-8601": "iso-8601",
+}
+
+
+def _translate_format_token(format: str) -> str:
+    """Translate a friendly date-format token (``dd-mm-yyyy``) to
+    its strftime equivalent (``%d-%m-%Y``) when the input doesn't
+    already contain ``%``. Returns the input unchanged if no
+    translation is found.
+    """
+    if not format or "%" in format:
+        return format
+    return _FRIENDLY_DATE_FORMAT_ALIASES.get(format.lower(), format)
+
+
+def _format_current_datetime(format: str | None, utc: bool) -> str:
+    """Shared implementation behind ``now()`` / ``nowUtc()`` /
+    ``nowLocal()``.
+
+    Translates friendly format aliases (``dd-mm-yyyy``) into
+    strftime codes so a workflow authored against the .NET
+    backend works unchanged when run on Python. ``None`` returns
+    the ISO 8601 representation with timezone offset; the
+    ``iso-8601`` alias returns the same shape (handy when the
+    format string comes from configuration that the author
+    wants to be portable across backends).
+    """
+    current = (
+        datetime.now(timezone.utc)
+        if utc
+        else datetime.now(timezone.utc).astimezone()
+    )
+    if not format:
+        return current.isoformat()
+
+    translated = _translate_format_token(format)
+    if translated.lower() == "iso-8601":
+        return current.isoformat()
+    return current.strftime(translated)
 class MathHelpers:
     """Mathematical helper functions."""
 
@@ -530,3 +739,95 @@ class DateHelpers:
         elif part_lower == "second":
             return dt.second
         return 0
+
+    # ------------------------------------------------------------------
+    # "Current time" helpers. The expression system had no way to
+    # ground a workflow in the actual run time — every date value
+    # had to be either hard-coded in the agent JSON or carried in
+    # through ``input``/``variables``. That made prompts that said
+    # "today is {{ ... }}" drift further from reality on every
+    # run, because the LLM had to fall back on its pre-training
+    # knowledge cutoff. The helpers below are evaluated against
+    # the host's wall clock at the moment the expression is
+    # evaluated, so ``${{ now() }}`` always reflects the moment
+    # the workflow is actually running.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    @workflow_helper(
+        "now",
+        category="Dates",
+        description=(
+            "Returns the current date/time in UTC as an ISO 8601 "
+            "string (e.g. '2026-06-30T23:03:58+00:00'). Use this to "
+            "ground an LLM prompt in the actual run time instead of "
+            "its pre-training knowledge cutoff."
+        ),
+    )
+    @workflow_helper_param(
+        "format",
+        "Optional format string. Accepts both Python strftime "
+        "codes (``%Y-%m-%d``) and common ``.NET`` / "
+        "human-readable tokens (``yyyy-MM-dd``, ``dd-mm-yyyy``). "
+        "When omitted, returns an ISO 8601 string with timezone "
+        "offset.",
+        optional=True,
+        default=None,
+    )
+    def now(format: str | None = None) -> str:
+        return _format_current_datetime(format, utc=True)
+
+    @staticmethod
+    @workflow_helper(
+        "nowUtc",
+        category="Dates",
+        description=(
+            "Alias for ``now()`` — returns the current UTC date/time "
+            "as an ISO 8601 string. Kept as a separate helper so "
+            "expression authors can be explicit about the timezone."
+        ),
+    )
+    @workflow_helper_param(
+        "format",
+        "Optional format string. Accepts both Python strftime "
+        "codes and common ``.NET`` / human-readable tokens.",
+        optional=True,
+        default=None,
+    )
+    def nowUtc(format: str | None = None) -> str:
+        return _format_current_datetime(format, utc=True)
+
+    @staticmethod
+    @workflow_helper(
+        "nowLocal",
+        category="Dates",
+        description=(
+            "Returns the current local date/time as an ISO 8601 "
+            "string with the host's timezone offset (e.g. "
+            "'2026-06-30T19:03:58-04:00'). Useful for prompts that "
+            "should reflect the user's wall clock rather than UTC."
+        ),
+    )
+    @workflow_helper_param(
+        "format",
+        "Optional format string. Accepts both Python strftime "
+        "codes and common ``.NET`` / human-readable tokens.",
+        optional=True,
+        default=None,
+    )
+    def nowLocal(format: str | None = None) -> str:
+        return _format_current_datetime(format, utc=False)
+
+    @staticmethod
+    @workflow_helper(
+        "today",
+        category="Dates",
+        description=(
+            "Returns today's date as 'YYYY-MM-DD' in the host's "
+            "local timezone. Convenience wrapper around "
+            "``nowLocal('%Y-%m-%d')`` for the common case of "
+            "grounding a prompt in 'today's date'."
+        ),
+    )
+    def today() -> str:
+        return datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")

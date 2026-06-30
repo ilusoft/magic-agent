@@ -113,6 +113,8 @@ class WorkflowExpressionService:
     - Simple placeholders: {{variable}}
     - Expression placeholders: ${{expression}}
     - Mixed content with multiple placeholders
+    - Date presets: {{today}}, {{now}}, {{dd-mm-yyyy}}, etc. — see
+      ``_resolve_preset``.
     """
 
     def __init__(self, helper_registry: WorkflowHelperRegistry | None = None) -> None:
@@ -153,6 +155,14 @@ class WorkflowExpressionService:
         Non-placeholder text is preserved verbatim. Placeholder contents may
         include JSON literals with nested braces (e.g. ``${{ { "a": 1 } }}``).
 
+        The resolver also honours a small set of "date preset"
+        keywords (``today``, ``now``, ``dd-mm-yyyy``, …) so that an
+        author who reaches for the legacy ``{{ … }}`` syntax still
+        gets a working current-date substitution. The presets are
+        resolved **before** the expression parser runs, so anything
+        that isn't a known preset is forwarded to the normal
+        expression evaluation path unchanged.
+
         Args:
             template: Template string with placeholders
             context: Evaluation context
@@ -184,8 +194,19 @@ class WorkflowExpressionService:
                     import json
                     value = json.loads(trimmed)
                 else:
-                    ast = parse_expression(trimmed)
-                    value = evaluator.evaluate(ast)
+                    # Try the date-preset path first. Anything
+                    # that isn't a recognised preset falls
+                    # through to the normal expression parser,
+                    # so adding new presets is purely additive
+                    # and never interferes with existing
+                    # expressions like ``var.foo`` or
+                    # ``length(array)``.
+                    preset = _resolve_date_preset(trimmed)
+                    if preset is not None:
+                        value = preset
+                    else:
+                        ast = parse_expression(trimmed)
+                        value = evaluator.evaluate(ast)
 
                 # Convert value to string
                 if value is None:
@@ -233,14 +254,75 @@ class WorkflowExpressionService:
 
 # Convenience function
 def resolve_template(template: str, context: ExpressionContext) -> ResolvedTemplate:
-    """Resolve placeholders in a template string.
+    """Resolve placeholders in a template string with context.
 
     Args:
         template: Template with {{ }} or ${{ }} placeholders
-        context: Evaluation context
+        context: Expression context
 
     Returns:
         ResolvedTemplate with result
     """
     service = WorkflowExpressionService()
     return service.resolve_placeholders(template, context)
+
+
+# Date preset keywords that the resolver recognises without
+# requiring the ``${{ … }}`` expression syntax. Authors who
+# write ``{{ today }}`` or ``{{ dd-mm-yyyy }}`` get a working
+# current-date substitution, even though the legacy ``{{ … }}``
+# syntax normally only handles variable lookups.
+#
+# Anything not in this map falls through to the normal
+# parser/evaluator, so the preset layer is purely additive.
+# Keep the keys lowercase — lookups are case-insensitive.
+_DATE_PRESETS: dict[str, str] = {
+    # Word presets
+    "today": "%Y-%m-%d",
+    "now": "iso-utc",
+    "nowutc": "iso-utc",
+    "nowlocal": "iso-local",
+    "currentdate": "%Y-%m-%d",
+    "currentdatetime": "iso-utc",
+    # Common date-format placeholders. The agent authors who
+    # write ``dd-mm-yyyy`` into a system prompt are signalling
+    # "substitute today's date here, formatted this way" — the
+    # resolver honours that intent without requiring them to
+    # learn the ``${{ now('dd-mm-yyyy') }}`` expression syntax.
+    "dd-mm-yyyy": "%d-%m-%Y",
+    "yyyy-mm-dd": "%Y-%m-%d",
+    "mm-dd-yyyy": "%m-%d-%Y",
+    "dd/mm/yyyy": "%d/%m/%Y",
+    "yyyy/mm/dd": "%Y/%m/%d",
+    "mm/dd/yyyy": "%m/%d/%Y",
+}
+
+
+def _resolve_date_preset(content: str) -> str | None:
+    """Return the resolved string for a recognised date preset,
+    or ``None`` if the content is not a preset (so the normal
+    parser/evaluator can take over).
+
+    The preset keys are case-insensitive — ``{{ Today }}`` and
+    ``{{ TODAY }}`` both resolve. Format placeholders like
+    ``{{ dd-mm-yyyy }}`` may include spaces around the inner
+    text; the caller already strips whitespace before calling
+    us.
+    """
+    from datetime import datetime, timezone
+
+    key = content.strip().lower()
+    if not key or key not in _DATE_PRESETS:
+        return None
+
+    preset = _DATE_PRESETS[key]
+    # ``iso-utc`` / ``iso-local`` are sentinels for the
+    # machine-readable defaults the ``now()`` / ``nowUtc()`` /
+    # ``nowLocal()`` helpers also produce. Everything else is
+    # an strftime pattern.
+    now_utc = datetime.now(timezone.utc)
+    if preset == "iso-utc":
+        return now_utc.isoformat()
+    if preset == "iso-local":
+        return now_utc.astimezone().isoformat()
+    return now_utc.astimezone().strftime(preset)
