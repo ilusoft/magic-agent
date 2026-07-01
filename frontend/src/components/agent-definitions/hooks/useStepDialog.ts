@@ -151,6 +151,7 @@ export function useStepDialog({
       mode,
       persistStepWithValidation,
       reset,
+      setStepFormError,
     ]
   );
 
@@ -172,6 +173,7 @@ export function useStepDialog({
     draftDocument,
     activeWorkflowId,
     stepOriginalName,
+    setStepFormError,
     deleteStepWithValidation,
     reset,
   ]);

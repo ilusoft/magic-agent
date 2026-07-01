@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using MagicAgent.Api.Application.Expressions;
@@ -227,6 +228,7 @@ public sealed class DefaultAgentRunner(
               parameterResolution.Debug,
               workflowVariables,
               workflowVariableStates,
+              progressSink,
               cancellationToken).ConfigureAwait(false);
 
             stepStopwatch.Stop();
@@ -295,6 +297,7 @@ public sealed class DefaultAgentRunner(
       IReadOnlyDictionary<string, WorkflowParameterDebugInfo> parameterDebug,
       IDictionary<string, string> workflowVariables,
       IDictionary<string, WorkflowVariableState> workflowVariableStates,
+      IAgentRunProgressSink progressSink,
       CancellationToken cancellationToken)
     {
         if (step.Type.Equals("agent", StringComparison.OrdinalIgnoreCase))
@@ -310,6 +313,7 @@ public sealed class DefaultAgentRunner(
               resolvedParameters,
               resolvedOptions,
               parameterDebug,
+              progressSink,
               cancellationToken);
         }
 
@@ -623,6 +627,7 @@ public sealed class DefaultAgentRunner(
       IReadOnlyDictionary<string, WorkflowExpressionValue> resolvedParameters,
       IReadOnlyDictionary<string, WorkflowExpressionValue> resolvedOptions,
       IReadOnlyDictionary<string, WorkflowParameterDebugInfo> parameterDebug,
+      IAgentRunProgressSink progressSink,
       CancellationToken cancellationToken)
     {
         var instructions = resolvedParameters.TryGetValue("systemPrompt", out var systemPromptValue)
@@ -687,6 +692,8 @@ public sealed class DefaultAgentRunner(
             var toolAnalysis = ToolInvocationUtilities.Analyze(runResponse);
             LogToolInvocations(definition.Id, step, toolAnalysis, agentRunStopwatch.Elapsed);
 
+            var iterationTraces = BuildIterationTraces(runResponse);
+            await EmitAgentTraceAsync(progressSink, definition.Id, step.Name, iterationTraces, toolAnalysis.ToolCalls, cancellationToken).ConfigureAwait(false);
 
             JsonElement? serializedThread = null;
 
@@ -697,7 +704,11 @@ public sealed class DefaultAgentRunner(
 
                 if (step.StopOnToolError)
                 {
-                    return (ToolInvocationUtilities.CreateErrorResult(step, toolAnalysis), activeConversationId, serializedThread, threadState);
+                    var errorResult = ToolInvocationUtilities.CreateErrorResult(step, toolAnalysis) with
+                    {
+                        Iterations = iterationTraces,
+                    };
+                    return (errorResult, activeConversationId, serializedThread, threadState);
                 }
             }
 
@@ -714,6 +725,7 @@ public sealed class DefaultAgentRunner(
             var stepResult = new AgentStepExecutionResult(step.Name, step.Type, output)
             {
                 ToolInvocations = toolAnalysis.ToolCalls,
+                Iterations = iterationTraces,
                 ToolErrorDetected = toolAnalysis.HasErrors,
                 ResolvedParameters = MaterializeResolvedValues(resolvedParameters),
                 ParameterDebug = parameterDebug,
@@ -816,6 +828,100 @@ public sealed class DefaultAgentRunner(
 
         await progressSink.RunCompletedAsync(runResult, cancellationToken).ConfigureAwait(false);
         return runResult;
+    }
+
+    /// <summary>
+    /// Walk the assistant messages of <paramref name="runResponse"/> and
+    /// build one <see cref="AgentIterationTrace"/> per LLM turn.
+    /// Captures the assistant's text (when present) and the names of
+    /// the tools it requested on that turn so the operator can see
+    /// how the model reasoned through intermediate steps instead of
+    /// only seeing the final assistant message.
+    /// </summary>
+    private static List<AgentIterationTrace> BuildIterationTraces(AgentRunResponse? runResponse)
+    {
+        if (runResponse?.Messages is not { Count: > 0 } messages)
+        {
+            return [];
+        }
+
+        var traces = new List<AgentIterationTrace>();
+        var iterationIndex = 0;
+
+        foreach (var message in messages)
+        {
+            if (message is null || !ChatRole.Assistant.Equals(message.Role))
+            {
+                continue;
+            }
+
+            var toolCallNames = new List<string>();
+            string? content = null;
+
+            if (message.Contents is { Count: > 0 })
+            {
+                var textBuilder = new StringBuilder();
+                foreach (var contentPart in message.Contents)
+                {
+                    switch (contentPart)
+                    {
+                        case FunctionCallContent functionCall:
+                            if (!string.IsNullOrWhiteSpace(functionCall.Name))
+                            {
+                                toolCallNames.Add(functionCall.Name!);
+                            }
+                            break;
+
+                        case TextContent textContent:
+                            if (!string.IsNullOrEmpty(textContent.Text))
+                            {
+                                textBuilder.Append(textContent.Text);
+                            }
+                            break;
+                    }
+                }
+
+                if (textBuilder.Length > 0)
+                {
+                    content = textBuilder.ToString();
+                }
+            }
+
+            if (content is null && !string.IsNullOrWhiteSpace(message.Text))
+            {
+                content = message.Text;
+            }
+
+            traces.Add(new AgentIterationTrace(
+                iterationIndex,
+                content,
+                toolCallNames,
+                toolCallNames.Count > 0,
+                DateTimeOffset.UtcNow));
+
+            iterationIndex++;
+        }
+
+        return traces;
+    }
+
+    private static async ValueTask EmitAgentTraceAsync(
+        IAgentRunProgressSink sink,
+        string agentId,
+        string stepName,
+        IReadOnlyList<AgentIterationTrace> iterations,
+        IReadOnlyList<AgentToolCall> toolCalls,
+        CancellationToken cancellationToken)
+    {
+        for (var i = 0; i < iterations.Count; i++)
+        {
+            await sink.IterationAsync(agentId, stepName, iterations[i], cancellationToken).ConfigureAwait(false);
+        }
+
+        for (var i = 0; i < toolCalls.Count; i++)
+        {
+            await sink.ToolCallAsync(agentId, stepName, toolCalls[i], cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private void LogToolInvocations(

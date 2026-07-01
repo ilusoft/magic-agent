@@ -13,8 +13,8 @@ import {
   type StepDialogBaseProps,
   StepDialogContainer,
   StepNameField,
-  useExpandedValueEditor,
 } from "@/components/agent-definitions/step-dialogs/StepDialogShared";
+import { useExpandedValueEditor } from "@/components/agent-definitions/step-dialogs/useExpandedValueEditor";
 import type { KeyValueEntry, WorkflowVariableDataType } from "@/components/agent-definitions/types";
 import { ExpressionBuilderButton } from "@/components/agent-definitions/expression-builder/ExpressionBuilderDialog";
 import { SimpleTooltip } from "@/components/SimpleTooltip";

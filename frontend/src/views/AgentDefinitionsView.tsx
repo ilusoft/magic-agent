@@ -110,6 +110,9 @@ export function AgentDefinitionsView({
       draftDocument.agents.find((agent) => agent.id === activeWorkflowId) ??
       null
     );
+    // ``documentRevision`` is a force-recompute trigger for the
+    // mutable ``draftDocument`` ref — see ``useAgentDefinitionsDocument``.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkflowId, draftDocument, documentRevision]);
 
   const graph: WorkflowGraph = useMemo(() => {
@@ -118,6 +121,9 @@ export function AgentDefinitionsView({
     }
 
     return buildWorkflowGraph(activeAgent);
+    // ``documentRevision`` is a force-recompute trigger for the
+    // mutable ``draftDocument`` ref — see ``useAgentDefinitionsDocument``.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAgent, documentRevision]);
 
   useEffect(() => {

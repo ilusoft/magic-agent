@@ -4,6 +4,8 @@ import ReactFlow, {
   ControlButton,
   Controls,
   MiniMap,
+  type EdgeTypes,
+  type NodeTypes,
   type OnEdgesChange,
   type OnNodesChange,
   type OnMoveEnd,
@@ -28,8 +30,8 @@ import { Grid3x3, SquareIcon } from "lucide-react";
 export interface WorkflowCanvasProps {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
-  nodeTypes: any;
-  edgeTypes: any;
+  nodeTypes: NodeTypes;
+  edgeTypes: EdgeTypes;
   snapEnabled: boolean;
   onToggleSnap: () => void;
   onNodesChange: OnNodesChange;
@@ -162,6 +164,7 @@ export function WorkflowCanvas({
     }
   }, [
     activeWorkflowId,
+    initialViewport,
     initialViewportTransform,
     nodesReady,
     reactFlow,

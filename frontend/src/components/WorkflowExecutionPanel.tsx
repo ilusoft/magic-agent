@@ -1,18 +1,30 @@
 import clsx from "clsx";
-import { ChevronDown } from "lucide-react";
+import { Bot, ChevronDown, Wrench } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type {
   AgentMessage,
   AgentRunResult,
   AgentStepExecutionResult,
+  AgentStepLiveTrace,
   LLMCallConfig,
   WorkflowVariableDataType,
 } from "@/types/agents";
+import {
+  buildAgentTraceEntries,
+  type AgentTraceEntry,
+} from "@/lib/agentTrace";
 
 interface WorkflowExecutionPanelProps {
   runs: AgentRunResult[];
   debugError: string | null;
   messages?: AgentMessage[];
+  /**
+   * Optional live trace entries captured from the SSE stream. Keyed
+   * by step name. Used to render the agent's reasoning as it
+   * happens, then superseded by the persisted `iterations` and
+   * `toolInvocations` arrays once the diagnostics payload loads.
+   */
+  liveTraces?: Record<string, AgentStepLiveTrace>;
 }
 
 function renderParameterDebug(
@@ -470,6 +482,7 @@ export function WorkflowExecutionPanel({
   runs,
   debugError,
   messages,
+  liveTraces,
 }: WorkflowExecutionPanelProps) {
   const sortedRuns = useMemo(() => {
     return [...runs].sort((a, b) => {
@@ -537,6 +550,8 @@ export function WorkflowExecutionPanel({
   return (
     <div className="space-y-3">
       <h3 className="text-lg font-semibold">Workflow Execution</h3>
+
+      {renderLiveTracePanel(liveTraces)}
 
       {debugError ? (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
@@ -674,6 +689,8 @@ export function WorkflowExecutionPanel({
                               {renderLLMConfig(step.llmConfig)}
 
                               {renderToolInvocations(step)}
+
+                              {renderAgentTrace(step, liveTraces?.[step.name])}
                             </li>
                           ))}
                         </ol>
@@ -783,6 +800,227 @@ function renderToolInvocations(step: AgentStepExecutionResult) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * Render the in-flight live trace while the SSE stream is still
+ * producing events. The diagnostics payload (and the per-step
+ * ``Agent Trace`` rendered inside the persisted run list) will
+ * supersede this once it arrives; this section is what the
+ * operator watches while the agent is mid-run.
+ */
+function renderLiveTracePanel(
+  liveTraces: Record<string, AgentStepLiveTrace> | undefined
+) {
+  if (!liveTraces) {
+    return null;
+  }
+  const entries = Object.values(liveTraces).filter(
+    (trace) =>
+      trace.iterations.length > 0 || trace.toolCalls.length > 0
+  );
+  if (entries.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+            Live Trace
+          </span>
+          <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+            Running
+          </span>
+        </div>
+        <span className="text-xs text-foreground/60">
+          {entries.length} {entries.length === 1 ? "step" : "steps"} in
+          flight
+        </span>
+      </div>
+      <div className="space-y-3">
+        {entries
+          .sort((a, b) => a.stepName.localeCompare(b.stepName))
+          .map((trace) => {
+            const syntheticStep: AgentStepExecutionResult = {
+              name: trace.stepName,
+              type: "agent",
+              output: "",
+              iterations: trace.iterations,
+              toolInvocations: trace.toolCalls,
+            };
+            return (
+              <div
+                key={`live-${trace.stepName}`}
+                className="rounded border border-border/40 bg-background/80 p-3"
+              >
+                <div className="mb-2 flex items-center justify-between text-xs">
+                  <span className="font-semibold uppercase text-foreground/60">
+                    {trace.stepName}
+                  </span>
+                  <span className="text-foreground/60">
+                    {trace.iterations.length}{" "}
+                    {trace.iterations.length === 1
+                      ? "iteration"
+                      : "iterations"}
+                    , {trace.toolCalls.length}{" "}
+                    {trace.toolCalls.length === 1
+                      ? "tool call"
+                      : "tool calls"}
+                  </span>
+                </div>
+                {renderAgentTraceEntries(
+                  buildAgentTraceEntries(syntheticStep, trace),
+                  trace.stepName
+                )}
+              </div>
+            );
+          })}
+      </div>
+    </div>
+  );
+}
+
+function renderAgentTraceEntries(entries: AgentTraceEntry[], stepName: string) {
+  if (entries.length === 0) {
+    return null;
+  }
+
+  return (
+    <ol className="mt-4 space-y-2">
+      {entries.map((entry, index) => {
+        if (entry.kind === "iteration") {
+          return (
+            <li
+              key={`${stepName}-iter-${entry.trace.iteration}-${index}`}
+              className="rounded border border-primary/30 bg-primary/5 p-3 text-sm text-foreground/90"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 font-medium">
+                  <Bot className="h-3.5 w-3.5 text-primary" />
+                  <span>
+                    Iteration {entry.trace.iteration + 1}
+                  </span>
+                  {entry.trace.hasToolCalls ? (
+                    <span className="rounded bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                      Tool call
+                    </span>
+                  ) : null}
+                </div>
+                <span className="text-xs uppercase tracking-wide text-foreground/60">
+                  {formatIterationTimestamp(entry.trace.timestamp)}
+                </span>
+              </div>
+              {entry.trace.content ? (
+                <p className="mt-2 whitespace-pre-wrap text-foreground/80">
+                  {entry.trace.content}
+                </p>
+              ) : (
+                <p className="mt-2 text-xs italic text-foreground/60">
+                  (assistant produced no text on this turn — it
+                  requested{" "}
+                  {entry.trace.toolCallNames.length === 1
+                    ? `the ${entry.trace.toolCallNames[0]} tool`
+                    : `${entry.trace.toolCallNames.length} tools`}
+                  )
+                </p>
+              )}
+              {entry.trace.toolCallNames.length > 0 ? (
+                <p className="mt-1 text-xs text-foreground/60">
+                  Tools requested: {entry.trace.toolCallNames.join(", ")}
+                </p>
+              ) : null}
+            </li>
+          );
+        }
+
+        const call = entry.toolCall;
+        return (
+          <li
+            key={`${stepName}-trace-tool-${call.invocationId ?? index}`}
+            className={clsx(
+              "rounded border p-3 text-sm",
+              call.errorMessage
+                ? "border-destructive/40 bg-destructive/5"
+                : "border-emerald-500/40 bg-emerald-500/5"
+            )}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 font-medium text-foreground/90">
+                <Wrench className="h-3.5 w-3.5" />
+                <span>{call.toolName ?? "Unknown tool"}</span>
+              </div>
+              {call.invocationId ? (
+                <span className="text-xs uppercase tracking-wide text-foreground/60">
+                  #{call.invocationId}
+                </span>
+              ) : null}
+            </div>
+            {call.argumentsJson ? renderToolArguments(call.argumentsJson) : null}
+            {renderToolResult(call.result)}
+            {call.errorMessage || call.errorDetails ? (
+              <div className="mt-2 rounded border border-destructive/40 bg-destructive/10 p-2 text-[13px] text-destructive">
+                {call.errorMessage ? (
+                  <p className="font-semibold">{call.errorMessage}</p>
+                ) : null}
+                {call.errorDetails ? (
+                  <p className="mt-1 whitespace-pre-wrap text-destructive/80">
+                    {call.errorDetails}
+                  </p>
+                ) : null}
+                {call.errorCode ? (
+                  <p className="mt-1 text-xs uppercase tracking-wide text-destructive/60">
+                    Code: {call.errorCode}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function formatIterationTimestamp(value: string): string {
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) {
+    return "—";
+  }
+  return new Date(timestamp).toLocaleTimeString();
+}
+
+function renderAgentTrace(
+  step: AgentStepExecutionResult,
+  liveTrace: AgentStepLiveTrace | undefined
+) {
+  const entries = buildAgentTraceEntries(step, liveTrace);
+  if (entries.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-4 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase text-foreground/60">
+          Agent Trace
+        </span>
+        <span className="text-xs text-foreground/60">
+          {entries.filter((entry) => entry.kind === "iteration").length}{" "}
+          {entries.filter((entry) => entry.kind === "iteration").length === 1
+            ? "iteration"
+            : "iterations"}
+          ,{" "}
+          {entries.filter((entry) => entry.kind === "tool-call").length}{" "}
+          {entries.filter((entry) => entry.kind === "tool-call").length === 1
+            ? "tool call"
+            : "tool calls"}
+        </span>
+      </div>
+      {renderAgentTraceEntries(entries, step.name)}
     </div>
   );
 }

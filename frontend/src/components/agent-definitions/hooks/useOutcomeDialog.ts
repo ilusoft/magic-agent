@@ -198,7 +198,7 @@ export function useOutcomeDialog({
         endWorkflow: outcome?.endWorkflow ?? false,
         expression: outcome?.condition?.expression ?? "",
         order: resolvedOrder ? String(resolvedOrder) : "",
-        executeByDefault: !Boolean(outcome?.condition?.expression),
+        executeByDefault: !outcome?.condition?.expression,
       };
     },
     []
@@ -554,7 +554,12 @@ export function useOutcomeDialog({
       setOutcomeFormError(null);
       setIsOpen(true);
     },
-    [draftDocument, activeWorkflowId, buildOutcomeFormState]
+    [
+      draftDocument,
+      activeWorkflowId,
+      buildOutcomeFormState,
+      computeNextOrderForStep,
+    ]
   );
 
   const handleFieldChange = useCallback(
@@ -764,10 +769,10 @@ export function useOutcomeDialog({
       dialogTarget,
       applyDocumentUpdate,
       reset,
-      computeNormalizedOrder,
       ensureUniqueOutcomeOrders,
       expressionValidationState,
       validationContext,
+      validateExpression,
     ]
   );
 

@@ -225,7 +225,12 @@ export function useWorkflowCanvas({
         return draft;
       });
     },
-    [activeWorkflowId, applyDocumentUpdate, workflowDebugLogging]
+    [
+      activeWorkflowId,
+      applyDocumentUpdate,
+      layoutLoggingEnabled,
+      workflowDebugLogging,
+    ]
   );
 
   useEffect(() => {
@@ -254,7 +259,14 @@ export function useWorkflowCanvas({
     lastGraphEdgesSignatureRef.current = edgesSignature;
     setNodes(graph.nodes);
     setEdgesState(graph.edges);
-  }, [graph.edges, graph.nodes, setNodes, setEdgesState]);
+  }, [
+    activeWorkflowId,
+    graph.edges,
+    graph.nodes,
+    setNodes,
+    setEdgesState,
+    workflowDebugLogging,
+  ]);
 
   useEffect(() => {
     if (lastWorkflowIdRef.current === (activeWorkflowId ?? null)) {
@@ -638,6 +650,7 @@ export function useWorkflowCanvas({
     handleAddEdgeControlPoint,
     handleRemoveEdgeControlPoint,
     activeEdgeId,
+    snapEnabled,
   ]);
 
   const handleEdgeMouseEnter = useCallback<EdgeMouseHandler>((_event, edge) => {

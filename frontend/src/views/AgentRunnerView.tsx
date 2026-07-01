@@ -4,9 +4,12 @@ import { BugPlay, MessageCircle } from "lucide-react";
 import type {
   AgentConversationDiagnostics,
   AgentDefinitionsDocument,
+  AgentIterationTrace,
   AgentMessage,
   AgentRunResult,
   AgentStepExecutionResult,
+  AgentStepLiveTrace,
+  AgentToolCall,
   AgentWorkflowResult,
 } from "@/types/agents";
 import { AgentChat } from "@/components/AgentChat";
@@ -25,6 +28,14 @@ export interface AgentRunnerState {
   diagnostics: AgentConversationDiagnostics | null;
   debugError: string | null;
   showDebugPanel: boolean;
+  /**
+   * Per-step trace events captured live from the SSE stream.
+   * Keyed by step name so the panel can merge them with the
+   * post-run `AgentStepExecutionResult.Iterations` list once the
+   * diagnostics payload arrives. Cleared at the start of every
+   * run.
+   */
+  liveTraces: Record<string, AgentStepLiveTrace>;
 }
 
 interface ParsedServerSentEvent {
@@ -86,7 +97,10 @@ export function AgentRunnerView({
   runnerState,
   setRunnerState,
 }: AgentRunnerViewProps) {
-  const agents = definitions?.agents ?? [];
+  const agents = useMemo(
+    () => definitions?.agents ?? [],
+    [definitions?.agents]
+  );
   const {
     selectedAgentId,
     input,
@@ -99,6 +113,7 @@ export function AgentRunnerView({
     diagnostics,
     debugError,
     showDebugPanel,
+    liveTraces,
   } = runnerState;
 
   const handleSelectAgent = useCallback(
@@ -116,6 +131,7 @@ export function AgentRunnerView({
         debugError: null,
         runError: null,
         showDebugPanel: false,
+        liveTraces: {},
         input: "",
       }));
     },
@@ -156,6 +172,30 @@ export function AgentRunnerView({
       });
     },
     [appendConversationMessage]
+  );
+
+  const upsertStepTrace = useCallback(
+    (
+      stepName: string,
+      updater: (current: AgentStepLiveTrace) => AgentStepLiveTrace
+    ) => {
+      setRunnerState((previous) => {
+        const existing = previous.liveTraces[stepName] ?? {
+          stepName,
+          iterations: [],
+          toolCalls: [],
+          persisted: false,
+        };
+        return {
+          ...previous,
+          liveTraces: {
+            ...previous.liveTraces,
+            [stepName]: updater(existing),
+          },
+        };
+      });
+    },
+    [setRunnerState]
   );
 
   const appendAssistantMessage = useCallback(
@@ -255,6 +295,7 @@ export function AgentRunnerView({
       isRunning: true,
       runError: null,
       debugError: null,
+      liveTraces: {},
     }));
 
     const authHeaders = createAuthHeaders();
@@ -338,6 +379,11 @@ export function AgentRunnerView({
         const decoder = new TextDecoder();
         let buffer = "";
         let runCompleted = false;
+        // Tracks the most recent ``step-start`` step name so
+        // ``agent-iteration`` / ``tool-call`` events (which only
+        // carry the step name but may arrive after the stream
+        // reorders a chunk boundary) can still be attributed.
+        let currentStepName: string | null = null;
 
         const handleRunCompletion = async (runResult: AgentRunResult) => {
           const lastStep = runResult.steps.at(-1);
@@ -382,12 +428,81 @@ export function AgentRunnerView({
                 stepType ? ` [${stepType}]` : ""
               }`.replace("$$", "")
             );
+            // Eagerly allocate a trace entry for this step so the
+            // ``agent-iteration``/``tool-call`` events that follow
+            // don't race the lookup.
+            if (stepName) {
+              upsertStepTrace(stepName, (current) => ({
+                ...current,
+                stepName,
+              }));
+            }
+            currentStepName = stepName ?? null;
             return;
           }
 
           if (eventName === "step-complete") {
             const step = (parsed as { step?: AgentStepExecutionResult }).step;
             appendSystemMessage(formatStepCompletion(step));
+            // Mark the live trace as superseded by the authoritative
+            // persisted version. ``WorkflowExecutionPanel`` keeps
+            // using the live trace until the diagnostics payload
+            // arrives; this flag signals "we already saw the
+            // final step record, so don't keep appending live
+            // iterations" — useful for steps that re-enter the
+            // ``step-start`` loop on a workflow hop.
+            if (step?.name) {
+              upsertStepTrace(step.name, (current) => ({
+                ...current,
+                persisted: true,
+              }));
+            }
+            return;
+          }
+
+          if (eventName === "agent-iteration" && typeof parsed === "object") {
+            const { stepName, iteration, content, toolCallNames, hasToolCalls, timestamp } =
+              parsed as {
+                stepName?: string;
+                iteration?: number;
+                content?: string | null;
+                toolCallNames?: string[];
+                hasToolCalls?: boolean;
+                timestamp?: string;
+              };
+            const target = stepName ?? currentStepName;
+            if (!target) {
+              return;
+            }
+            const trace: AgentIterationTrace = {
+              iteration: iteration ?? 0,
+              content: content ?? null,
+              toolCallNames: Array.isArray(toolCallNames) ? toolCallNames : [],
+              hasToolCalls: Boolean(hasToolCalls),
+              timestamp: timestamp ?? new Date().toISOString(),
+            };
+            upsertStepTrace(target, (current) => ({
+              ...current,
+              stepName: target,
+              iterations: [...current.iterations, trace],
+            }));
+            return;
+          }
+
+          if (eventName === "tool-call" && typeof parsed === "object") {
+            const { stepName, toolCall } = parsed as {
+              stepName?: string;
+              toolCall?: AgentToolCall;
+            };
+            const target = stepName ?? currentStepName;
+            if (!target || !toolCall) {
+              return;
+            }
+            upsertStepTrace(target, (current) => ({
+              ...current,
+              stepName: target,
+              toolCalls: [...current.toolCalls, toolCall],
+            }));
             return;
           }
 
@@ -456,6 +571,7 @@ export function AgentRunnerView({
       runError: null,
       diagnostics: null,
       debugError: null,
+      liveTraces: {},
       input: "",
     }));
   };
@@ -605,6 +721,7 @@ export function AgentRunnerView({
               runs={workflowRuns}
               debugError={debugError}
               messages={conversation}
+              liveTraces={liveTraces}
             />
 
             <div className="mt-6 space-y-3">

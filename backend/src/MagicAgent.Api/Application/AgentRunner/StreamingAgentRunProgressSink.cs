@@ -70,6 +70,38 @@ internal sealed class StreamingAgentRunProgressSink : IAgentRunProgressSink, IAs
         _events.Writer.TryComplete();
     }
 
+    public async ValueTask IterationAsync(
+        string agentId,
+        string stepName,
+        AgentIterationTrace trace,
+        CancellationToken cancellationToken)
+    {
+        await EnqueueAsync("agent-iteration", new
+        {
+            agentId,
+            stepName,
+            iteration = trace.Iteration,
+            content = trace.Content,
+            toolCallNames = trace.ToolCallNames,
+            hasToolCalls = trace.HasToolCalls,
+            timestamp = trace.Timestamp,
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async ValueTask ToolCallAsync(
+        string agentId,
+        string stepName,
+        AgentToolCall toolCall,
+        CancellationToken cancellationToken)
+    {
+        await EnqueueAsync("tool-call", new
+        {
+            agentId,
+            stepName,
+            toolCall,
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
     public async ValueTask DisposeAsync()
     {
         _events.Writer.TryComplete();

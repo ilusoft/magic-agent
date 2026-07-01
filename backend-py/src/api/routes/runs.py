@@ -267,6 +267,52 @@ async def _build_sse_response(
                 )
             )
 
+        async def iteration(
+            self,
+            agent_id: str,
+            step_name: str,
+            trace: Any,
+        ) -> None:
+            await queue.put(
+                (
+                    "agent-iteration",
+                    {
+                        "agentId": agent_id,
+                        "stepName": step_name,
+                        "iteration": getattr(trace, "iteration", 0),
+                        "content": getattr(trace, "content", None),
+                        "toolCallNames": list(
+                            getattr(trace, "tool_call_names", []) or []
+                        ),
+                        "hasToolCalls": bool(
+                            getattr(trace, "has_tool_calls", False)
+                        ),
+                        "timestamp": getattr(trace, "timestamp", None),
+                    },
+                )
+            )
+
+        async def tool_call(
+            self,
+            agent_id: str,
+            step_name: str,
+            tool_call: Any,
+        ) -> None:
+            await queue.put(
+                (
+                    "tool-call",
+                    {
+                        "agentId": agent_id,
+                        "stepName": step_name,
+                        "toolCall": (
+                            tool_call.to_dict()
+                            if hasattr(tool_call, "to_dict")
+                            else tool_call
+                        ),
+                    },
+                )
+            )
+
     sink = _QueueSink()
 
     async def _run_workflow() -> None:

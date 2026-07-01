@@ -23,6 +23,7 @@ const defaultRunnerState: AgentRunnerState = {
   diagnostics: null,
   debugError: null,
   showDebugPanel: false,
+  liveTraces: {},
 };
 
 function loadRunnerState(): AgentRunnerState {
@@ -105,9 +106,12 @@ function App() {
     loadDefinitions();
   }, [loadDefinitions]);
 
-  const handleDefinitionsUpdated = (document: AgentDefinitionsDocument) => {
-    setDefinitions(document);
-  };
+  const handleDefinitionsUpdated = useCallback(
+    (document: AgentDefinitionsDocument) => {
+      setDefinitions(document);
+    },
+    []
+  );
 
   const handleReloadDefinitions = useCallback(async () => {
     await loadDefinitions();

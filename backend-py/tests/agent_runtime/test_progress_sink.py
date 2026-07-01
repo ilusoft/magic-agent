@@ -18,8 +18,10 @@ from src.agent_runtime.progress_sink import (
     SseProgressSink,
 )
 from src.application.agents.run_result import (
+    AgentIterationTrace,
     AgentRunResult,
     AgentStepExecutionResult,
+    AgentToolCall,
 )
 
 
@@ -141,6 +143,56 @@ class TestSseProgressSink:
         )
         assert send.messages[0]["more_body"] is True
 
+    @pytest.mark.asyncio
+    async def test_iteration_event_format(
+        self, sink: SseProgressSink, send: _CollectingSend
+    ) -> None:
+        """Per-LLM-turn trace event surfaced in the SPA's trace panel."""
+        trace = AgentIterationTrace(
+            iteration=2,
+            content="Let me check the docs first",
+            tool_call_names=["docs_search"],
+            has_tool_calls=True,
+        )
+        await sink.iteration(
+            agent_id="agent-1", step_name="research", trace=trace
+        )
+        event_name, payload = _parse_event(send.messages[0]["body"])
+        assert event_name == "agent-iteration"
+        assert payload["agentId"] == "agent-1"
+        assert payload["stepName"] == "research"
+        assert payload["iteration"] == 2
+        assert payload["content"] == "Let me check the docs first"
+        assert payload["toolCallNames"] == ["docs_search"]
+        assert payload["hasToolCalls"] is True
+        # Timestamp must be a string so JSON.parse on the SPA side
+        # can hydrate it into a Date without further coercion.
+        assert isinstance(payload["timestamp"], str)
+
+    @pytest.mark.asyncio
+    async def test_tool_call_event_format(
+        self, sink: SseProgressSink, send: _CollectingSend
+    ) -> None:
+        """Per-tool-execution trace event surfaced in the SPA's trace panel."""
+        record = AgentToolCall(
+            tool_name="docs_search",
+            invocation_id="call_42",
+            result='{"hits": 3}',
+            arguments_json='{"query": "magic agent"}',
+            error_message=None,
+        )
+        await sink.tool_call(
+            agent_id="agent-1", step_name="research", tool_call=record
+        )
+        event_name, payload = _parse_event(send.messages[0]["body"])
+        assert event_name == "tool-call"
+        assert payload["agentId"] == "agent-1"
+        assert payload["stepName"] == "research"
+        assert payload["toolCall"]["toolName"] == "docs_search"
+        assert payload["toolCall"]["invocationId"] == "call_42"
+        assert payload["toolCall"]["result"] == '{"hits": 3}'
+        assert payload["toolCall"]["argumentsJson"] == '{"query": "magic agent"}'
+
 
 class TestNoOpProgressSink:
     """``NoOpProgressSink`` is the default for sync runs."""
@@ -166,6 +218,22 @@ class TestNoOpProgressSink:
             )
             is None
         )
+        assert (
+            await sink.iteration(
+                agent_id="a",
+                step_name="s",
+                trace=AgentIterationTrace(iteration=0, content="hi"),
+            )
+            is None
+        )
+        assert (
+            await sink.tool_call(
+                agent_id="a",
+                step_name="s",
+                tool_call=AgentToolCall(tool_name="t"),
+            )
+            is None
+        )
 
 
 class TestProtocolShape:
@@ -177,9 +245,13 @@ class TestProtocolShape:
         assert hasattr(sink, "step_start")
         assert hasattr(sink, "step_complete")
         assert hasattr(sink, "run_complete")
+        assert hasattr(sink, "iteration")
+        assert hasattr(sink, "tool_call")
 
     def test_noop_sink_satisfies_protocol(self) -> None:
         sink: AgentRunProgressSink = NoOpProgressSink()
         assert hasattr(sink, "step_start")
         assert hasattr(sink, "step_complete")
         assert hasattr(sink, "run_complete")
+        assert hasattr(sink, "iteration")
+        assert hasattr(sink, "tool_call")

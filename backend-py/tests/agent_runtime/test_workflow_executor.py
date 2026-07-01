@@ -312,7 +312,7 @@ class TestAgentLoop:
 
         from langchain_core.messages import HumanMessage
 
-        response = await executor._run_agent_loop(
+        response, iterations, tool_calls = await executor._run_agent_loop(
             llm=llm,
             messages=[HumanMessage(content="What's the capital of France?")],
             tools=[tool],
@@ -320,6 +320,13 @@ class TestAgentLoop:
         assert response.content == "the capital is Paris"
         # Only one LLM call should have been made.
         assert llm.call_count == 1
+        # No tool calls were issued, so the trace list is empty.
+        assert tool_calls == []
+        # One iteration: the assistant's final text turn.
+        assert len(iterations) == 1
+        assert iterations[0].content == "the capital is Paris"
+        assert iterations[0].has_tool_calls is False
+        assert iterations[0].tool_call_names == []
 
     @pytest.mark.asyncio
     async def test_loop_handles_multiple_tool_call_rounds(self) -> None:
@@ -365,13 +372,22 @@ class TestAgentLoop:
 
         from langchain_core.messages import HumanMessage
 
-        response = await executor._run_agent_loop(
+        response, iterations, tool_calls = await executor._run_agent_loop(
             llm=llm,
             messages=[HumanMessage(content="What's the capital of France?")],
             tools=[tool],
         )
         assert response.content == "the capital of France is Paris"
         assert llm.call_count == 3
+        # Two tool-call iterations and one final text iteration.
+        assert len(iterations) == 3
+        assert [it.has_tool_calls for it in iterations] == [True, True, False]
+        assert [it.tool_call_names for it in iterations[:2]] == [
+            ["web_search"],
+            ["web_search"],
+        ]
+        # Both tool calls captured in order with the LLM's id.
+        assert [tc.invocation_id for tc in tool_calls] == ["call_1", "call_2"]
 
     @pytest.mark.asyncio
     async def test_loop_returns_last_response_on_iteration_cap(self) -> None:
@@ -405,7 +421,7 @@ class TestAgentLoop:
 
         from langchain_core.messages import HumanMessage
 
-        response = await executor._run_agent_loop(
+        response, iterations, tool_calls = await executor._run_agent_loop(
             llm=llm,
             messages=[HumanMessage(content="hi")],
             tools=[tool],
@@ -415,6 +431,12 @@ class TestAgentLoop:
         # Last response had a tool call (no text).
         assert not response.content
         assert response.tool_calls
+        # Every iteration was a tool-call turn, and we captured
+        # ``cap`` tool-call records — the loop is the one that
+        # surfaced them, not a post-hoc analyser.
+        assert len(iterations) == 8
+        assert all(it.has_tool_calls for it in iterations)
+        assert len(tool_calls) == 8
 
     @pytest.mark.asyncio
     async def test_loop_passes_tool_args_intact(self) -> None:
@@ -474,12 +496,16 @@ class TestAgentLoop:
 
         from langchain_core.messages import HumanMessage
 
-        await executor._run_agent_loop(
+        _, _, tool_calls = await executor._run_agent_loop(
             llm=llm,
             messages=[HumanMessage(content="hi")],
             tools=[tool],
         )
         assert captured == [{"query": "France capital"}]
+        # The tool call's serialised arguments must round-trip through
+        # the trace so the diagnostics endpoint can show what the
+        # model asked for, not just that it asked.
+        assert tool_calls[0].arguments_json == '{"query": "France capital"}'
 
 
 class _SequenceLLM:

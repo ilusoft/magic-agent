@@ -29,6 +29,8 @@ public sealed record AgentStepExecutionResult(string Name, string Type, string O
 
     public List<AgentToolCall> ToolInvocations { get; init; } = [];
 
+    public List<AgentIterationTrace> Iterations { get; init; } = [];
+
     public bool ToolErrorDetected { get; init; }
 }
 
@@ -42,6 +44,20 @@ public sealed record AgentToolCall(
     string? ErrorMessage,
     string? ErrorDetails,
     string? ErrorCode);
+
+/// <summary>
+/// One LLM turn inside an agent step. Captures the assistant's text
+/// (when present) plus the tool calls it requested on that turn so
+/// the operator can see how the model reasoned its way to a final
+/// answer — including intermediate "thinking" turns where the model
+/// requested more tool calls before producing text.
+/// </summary>
+public sealed record AgentIterationTrace(
+    int Iteration,
+    string? Content,
+    IReadOnlyList<string> ToolCallNames,
+    bool HasToolCalls,
+    DateTimeOffset Timestamp);
 
 public sealed record WorkflowVariableDebugInfo(
     string RawValue,

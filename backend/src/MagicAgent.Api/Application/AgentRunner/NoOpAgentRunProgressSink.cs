@@ -29,4 +29,22 @@ internal sealed class NoOpAgentRunProgressSink : IAgentRunProgressSink
     {
         return ValueTask.CompletedTask;
     }
+
+    public ValueTask IterationAsync(
+        string agentId,
+        string stepName,
+        AgentIterationTrace trace,
+        CancellationToken cancellationToken)
+    {
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask ToolCallAsync(
+        string agentId,
+        string stepName,
+        AgentToolCall toolCall,
+        CancellationToken cancellationToken)
+    {
+        return ValueTask.CompletedTask;
+    }
 }

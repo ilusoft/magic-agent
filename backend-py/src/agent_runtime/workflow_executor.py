@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from datetime import datetime
@@ -26,6 +27,7 @@ from src.infrastructure.diagnostics.store import (
     get_diagnostics_store,
 )
 from src.application.agents.run_result import (
+    AgentIterationTrace,
     AgentRunResult,
     AgentStepExecutionResult,
     AgentToolCall,
@@ -52,6 +54,12 @@ class _NoOpSink:
         return None
 
     async def run_complete(self, _run_result: Any) -> None:
+        return None
+
+    async def iteration(self, **_kwargs: Any) -> None:
+        return None
+
+    async def tool_call(self, **_kwargs: Any) -> None:
         return None
 
 
@@ -432,6 +440,13 @@ class WorkflowExecutor:
                 variable_debug: dict[str, Any] | None = None
                 thread_context: dict[str, Any] | None = None
                 tool_invocations: list = []
+                # Per-LLM-turn trace collected from the agent loop.
+                # ``agent`` steps populate it via ``_execute_step``;
+                # ``echo``/``setVariables`` leave it empty. Attached
+                # to the step record below so it reaches the
+                # diagnostics endpoint and the ``run-complete``
+                # SSE event.
+                step_iterations: list[AgentIterationTrace] = []
                 # Built upfront for ``agent`` steps so the diagnostics
                 # endpoint can still see which backend was attempted
                 # when the actual LLM call raises. Stays ``None`` for
@@ -455,17 +470,29 @@ class WorkflowExecutor:
                     parameter_debug = resolved_step.get("parameter_debug")
                     variable_debug = resolved_step.get("variable_debug")
 
-                    output, new_conversation_id = await self._execute_step(
-                        step=resolved_step,
-                        step_type=step_type,
-                        variables=variables,
-                        agent_definition=agent_definition,
-                        context=context,
-                        mcp_tools=mcp_tools,
-                        conversation_id=conversation_id,
+                    output, new_conversation_id, step_iterations, step_tool_calls = (
+                        await self._execute_step(
+                            step=resolved_step,
+                            step_type=step_type,
+                            variables=variables,
+                            agent_definition=agent_definition,
+                            context=context,
+                            mcp_tools=mcp_tools,
+                            conversation_id=conversation_id,
+                            progress_sink=progress_sink,
+                            agent_id=agent_id,
+                        )
                     )
                     if new_conversation_id:
                         conversation_id = new_conversation_id
+                    # ``step_tool_calls`` is the per-step tool-call
+                    # list returned by ``_execute_step``; replaces the
+                    # empty initialiser so the diagnostics payload
+                    # reflects the actual calls performed during the
+                    # agent loop. ``agent`` steps populate it;
+                    # ``echo``/``setVariables`` return an empty list.
+                    if step_tool_calls:
+                        tool_invocations = list(step_tool_calls)
 
                 except Exception as e:
                     logger.error(
@@ -521,6 +548,16 @@ class WorkflowExecutor:
                     "outcome": outcome,
                     "next_step": next_step,
                     "end_workflow": end_workflow,
+                    # Per-LLM-turn reasoning trace collected from
+                    # the agent loop. Stored in snake_case as a list
+                    # of plain dicts so it round-trips through the
+                    # diagnostics store; the typed dataclass is
+                    # rebuilt when the step record is converted to
+                    # an ``AgentStepExecutionResult`` below. Each
+                    # entry has the iteration index, the assistant's
+                    # text (when present), the names of the tools
+                    # it requested, and the observation timestamp.
+                    "iterations": [it.to_dict() for it in step_iterations],
                     # LLM config snapshot (provider/model/endpoint/etc.)
                     # must round-trip through the diagnostics store
                     # so the ``/debug`` endpoint and the SSE
@@ -565,6 +602,7 @@ class WorkflowExecutor:
                     next_step=next_step,
                     end_workflow=end_workflow,
                     tool_invocations=tool_invocations,
+                    iterations=list(step_iterations),
                     llm_config=step_llm_config,
                 )
                 if error_message is not None:
@@ -610,6 +648,10 @@ class WorkflowExecutor:
                 if isinstance(llm_config_data, dict)
                 else None
             )
+            iterations_data = step_data.get("iterations") or []
+            iterations = [
+                AgentIterationTrace.from_dict(it) for it in iterations_data
+            ]
             step_result = AgentStepExecutionResult(
                 name=step_name,
                 type=step_data.get("type", "unknown"),
@@ -620,6 +662,7 @@ class WorkflowExecutor:
                 outcome=step_data.get("outcome"),
                 next_step=step_data.get("next_step"),
                 end_workflow=step_data.get("end_workflow", False),
+                iterations=iterations,
                 llm_config=llm_config,
             )
             if "error" in step_data:
@@ -1085,7 +1128,10 @@ class WorkflowExecutor:
         context: ExpressionContext,
         mcp_tools: dict[str, list[Any]] | None = None,
         conversation_id: str | None = None,
-    ) -> tuple[str, str | None]:
+        *,
+        progress_sink: Any | None = None,
+        agent_id: str = "",
+    ) -> tuple[str, str | None, list[AgentIterationTrace], list[AgentToolCall]]:
         """Execute a single workflow step.
 
         Args:
@@ -1096,30 +1142,47 @@ class WorkflowExecutor:
             context: Expression context
             mcp_tools: Dict of MCP tool ID to list of LangChain tools
             conversation_id: Optional conversation ID for multi-turn conversations
+            progress_sink: Optional sink used to emit per-iteration and
+                per-tool-call ``agent-iteration`` / ``tool-call`` SSE
+                events. ``None`` disables live emission but the
+                returned lists are still populated.
+            agent_id: Agent definition id, forwarded to the sink for
+                event payloads.
 
         Returns:
-            Tuple of (step output, conversation_id if applicable).
-            The ``llm_config`` diagnostic snapshot is built by the
-            caller (``execute_stream``) before this call so it
-            survives a failing LLM invocation.
+            Tuple of ``(step output, conversation_id, iterations,
+            tool_calls)``. ``iterations`` and ``tool_calls`` are
+            populated for ``agent`` steps and empty for
+            ``setVariables``/``echo``. The caller attaches them to
+            the step result so they reach the diagnostics endpoint
+            and the ``run-complete`` SSE event.
         """
         if step_type == "setVariables":
             result = await self._execute_set_variables(step, variables, context)
-            return result, conversation_id
+            return result, conversation_id, [], []
 
         elif step_type == "echo":
             result = await self._execute_echo(step, variables, context)
-            return result, conversation_id
+            return result, conversation_id, [], []
 
         elif step_type == "agent":
-            output, new_conversation_id, _llm_config = await self._execute_agent(
-                step, variables, agent_definition, context, mcp_tools or {}, conversation_id
+            output, new_conversation_id, _llm_config, iterations, tool_calls = (
+                await self._execute_agent(
+                    step,
+                    variables,
+                    agent_definition,
+                    context,
+                    mcp_tools or {},
+                    conversation_id,
+                    progress_sink=progress_sink,
+                    agent_id=agent_id,
+                )
             )
-            return output, new_conversation_id
+            return output, new_conversation_id, iterations, tool_calls
 
         else:
             logger.warning("unknown_step_type", step_type=step_type)
-            return "", conversation_id
+            return "", conversation_id, [], []
 
     async def _execute_set_variables(
         self,
@@ -1192,7 +1255,10 @@ class WorkflowExecutor:
         context: ExpressionContext,
         mcp_tools: dict[str, list[Any]],
         conversation_id: str | None = None,
-    ) -> tuple[str, str | None, dict[str, Any]]:
+        *,
+        progress_sink: Any | None = None,
+        agent_id: str = "",
+    ) -> tuple[str, str | None, dict[str, Any], list[AgentIterationTrace], list[AgentToolCall]]:
         """Execute an agent step (LLM chat).
 
         Args:
@@ -1202,13 +1268,21 @@ class WorkflowExecutor:
             context: Expression context
             mcp_tools: Dict of MCP tool ID to list of LangChain tools
             conversation_id: Optional conversation ID for multi-turn conversations
+            progress_sink: Optional sink that receives ``agent-iteration``
+                and ``tool-call`` events as the agent loop runs.
+            agent_id: Agent definition id, forwarded to the sink for
+                event payloads.
 
         Returns:
-            Tuple of (agent response, conversation_id if created/used,
-            resolved llm config dict). The dict is currently unused by
-            callers (the diagnostics snapshot is built upfront by
-            ``execute_stream``) but is returned so tests can inspect
-            the resolved values without rebuilding them.
+            Tuple of ``(agent response, conversation_id, resolved llm
+            config dict, iterations, tool_calls)``. ``iterations``
+            captures the assistant's text + tool-call requests per
+            LLM turn; ``tool_calls`` lists each tool execution. Both
+            are empty when the agent loop did not run. The ``llm_config``
+            dict is currently unused by callers (the diagnostics
+            snapshot is built upfront by ``execute_stream``) but is
+            returned so tests can inspect the resolved values
+            without rebuilding them.
         """
         parameters = step.get("parameters", {})
         system_prompt = parameters.get("systemPrompt", "")
@@ -1289,14 +1363,40 @@ class WorkflowExecutor:
         # smaller/quantised local models (e.g. Qwen3.6-35B-A3B) return
         # an empty ``content`` field and the workflow step produced
         # no output.
+        step_name = step.get("name", "")
+        iterations: list[AgentIterationTrace] = []
+        tool_calls_out: list[AgentToolCall] = []
         if langchain_tools:
-            response = await self._run_agent_loop(
+            response, iterations, tool_calls_out = await self._run_agent_loop(
                 llm=llm,
                 messages=messages,
                 tools=langchain_tools,
+                progress_sink=progress_sink,
+                agent_id=agent_id,
+                step_name=step_name,
             )
         else:
             response = await llm.ainvoke(messages)
+            # Single-turn path: surface the assistant's text as one
+            # iteration so the UI still shows a (no-tool) trace.
+            response_content = getattr(response, "content", "") or ""
+            iterations.append(
+                AgentIterationTrace(
+                    iteration=0,
+                    content=response_content if response_content else None,
+                    tool_call_names=[],
+                    has_tool_calls=False,
+                )
+            )
+            if progress_sink is not None:
+                try:
+                    await progress_sink.iteration(
+                        agent_id=agent_id,
+                        step_name=step_name,
+                        trace=iterations[-1],
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("iteration_event_failed", error=str(exc))
 
         response_content = getattr(response, "content", str(response))
         if not response_content:
@@ -1325,15 +1425,25 @@ class WorkflowExecutor:
             # Save to store
             await conversation_context.save()
 
-        return response_content, conversation_context.conversation_id, llm_config
+        return (
+            response_content,
+            conversation_context.conversation_id,
+            llm_config,
+            iterations,
+            tool_calls_out,
+        )
 
     async def _run_agent_loop(
         self,
         llm: Any,
         messages: list[Any],
         tools: list[Any],
+        *,
+        progress_sink: Any | None = None,
+        agent_id: str = "",
+        step_name: str = "",
         max_iterations: int = 8,
-    ) -> Any:
+    ) -> tuple[Any, list[AgentIterationTrace], list[AgentToolCall]]:
         """Run the LLM in an agent loop until it returns text.
 
         Some local models (Qwen3.6-35B-A3B-OptiQ-4bit among them)
@@ -1350,28 +1460,54 @@ class WorkflowExecutor:
         either get a non-empty ``content`` or hit ``max_iterations``.
         Each iteration logs what the model did so the operator can
         see whether the LLM is making progress or stuck in a loop.
+
+        When ``progress_sink`` is provided, each iteration is also
+        emitted as an ``agent-iteration`` SSE event for the live UI;
+        regardless of the sink, the function returns the captured
+        ``iterations`` and ``tool_calls`` lists so the caller can
+        attach them to the step record.
         """
-        from langchain_core.messages import AIMessage
-
         llm_with_tools = llm.bind_tools(tools)
+        iterations: list[AgentIterationTrace] = []
+        tool_calls_out: list[AgentToolCall] = []
 
-        for iteration in range(max_iterations):
+        for iteration_index in range(max_iterations):
             response = await llm_with_tools.ainvoke(messages)
 
             tool_calls = getattr(response, "tool_calls", None) or []
             content = getattr(response, "content", "") or ""
 
+            tool_call_names = [
+                tc.get("name") for tc in tool_calls if tc.get("name")
+            ]
+            trace = AgentIterationTrace(
+                iteration=iteration_index,
+                content=content if content else None,
+                tool_call_names=tool_call_names,
+                has_tool_calls=bool(tool_calls),
+            )
+            iterations.append(trace)
+            if progress_sink is not None:
+                try:
+                    await progress_sink.iteration(
+                        agent_id=agent_id,
+                        step_name=step_name,
+                        trace=trace,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("iteration_event_failed", error=str(exc))
+
             logger.debug(
                 "agent_loop_iteration",
-                iteration=iteration,
+                iteration=iteration_index,
                 has_content=bool(content),
                 content_preview=content[:200] if content else "",
-                tool_call_names=[tc.get("name") for tc in tool_calls],
+                tool_call_names=tool_call_names,
             )
 
             if not tool_calls:
                 # No tool calls: this is the final response.
-                return response
+                return response, iterations, tool_calls_out
 
             # Execute the tool calls and append the results, then
             # loop again so the model can either chain another tool
@@ -1381,6 +1517,10 @@ class WorkflowExecutor:
                 tool_calls=tool_calls,
                 tools=tools,
                 messages=messages,
+                tool_calls_out=tool_calls_out,
+                progress_sink=progress_sink,
+                agent_id=agent_id,
+                step_name=step_name,
             )
 
         logger.warning(
@@ -1392,51 +1532,88 @@ class WorkflowExecutor:
                 "(which may be empty) so the workflow can continue."
             ),
         )
-        return response
+        return response, iterations, tool_calls_out
 
     async def _execute_tool_calls(
         self,
         tool_calls: list[Any],
         tools: list[Any],
         messages: list[Any],
+        *,
+        tool_calls_out: list[AgentToolCall] | None = None,
+        progress_sink: Any | None = None,
+        agent_id: str = "",
+        step_name: str = "",
     ) -> None:
         """Execute a batch of tool calls and append results to ``messages``.
 
         Mirrors the body of the previous ``_handle_tool_calls`` but
         factored out so the agent loop can call it multiple times
         and so the synthesis step isn't tangled up with execution.
+
+        When ``tool_calls_out`` is provided, each executed call is
+        appended so the caller can attach the full list to the step
+        record. When ``progress_sink`` is provided, each call is
+        also emitted as a ``tool-call`` SSE event for the live UI.
         """
         from langchain_core.messages import ToolMessage
 
         for tool_call in tool_calls:
             tool_name = tool_call.get("name")
-            tool_args = tool_call.get("args", {})
+            tool_args = tool_call.get("args", {}) or {}
+            tool_call_id = tool_call.get("id")
 
             tool = next((t for t in tools if t.name == tool_name), None)
             if not tool:
                 logger.warning("tool_not_found", tool_name=tool_name)
                 continue
 
+            arguments_json = (
+                json.dumps(tool_args) if tool_args else None
+            )
+            started_at = time.time()
+            result_text: str
+            error_message: str | None = None
             try:
                 if hasattr(tool, "ainvoke"):
                     tool_result = await tool.ainvoke(tool_args)
                 else:
                     tool_result = await tool.invoke(tool_args)
-
-                messages.append(
-                    ToolMessage(
-                        content=str(tool_result),
-                        tool_call_id=tool_call.get("id"),
-                    )
+                result_text = (
+                    str(tool_result) if tool_result is not None else ""
                 )
             except Exception as e:
-                logger.error("tool_call_failed", tool_name=tool_name, error=str(e))
-                messages.append(
-                    ToolMessage(
-                        content=f"Error: {str(e)}",
-                        tool_call_id=tool_call.get("id"),
-                    )
+                logger.error(
+                    "tool_call_failed", tool_name=tool_name, error=str(e)
                 )
+                error_message = str(e)
+                result_text = f"Error: {error_message}"
+
+            record = AgentToolCall(
+                tool_name=tool_name,
+                invocation_id=tool_call_id,
+                result=result_text,
+                arguments_json=arguments_json,
+                error_message=error_message,
+            )
+            if tool_calls_out is not None:
+                tool_calls_out.append(record)
+            if progress_sink is not None:
+                try:
+                    await progress_sink.tool_call(
+                        agent_id=agent_id,
+                        step_name=step_name,
+                        tool_call=record,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("tool_call_event_failed", error=str(exc))
+
+            messages.append(
+                ToolMessage(
+                    content=result_text,
+                    tool_call_id=tool_call_id,
+                )
+            )
 
 
 # Singleton

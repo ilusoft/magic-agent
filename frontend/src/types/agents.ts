@@ -148,9 +148,45 @@ export interface AgentStepExecutionResult {
   nextStep?: string | null;
   endWorkflow?: boolean;
   toolInvocations?: AgentToolCall[];
+  iterations?: AgentIterationTrace[];
   toolErrorDetected?: boolean;
   llmConfig?: LLMCallConfig | null;
 }
+
+/**
+ * One LLM turn inside an agent step. Mirrors the
+ * `AgentIterationTrace` payload emitted by the backend's
+ * `agent-iteration` SSE event and persisted on
+ * `AgentStepExecutionResult.Iterations`. Used by the trace panel
+ * to render the model's intermediate reasoning — including turns
+ * where it only requested tools and produced no user-facing text.
+ */
+export interface AgentIterationTrace {
+  iteration: number;
+  content?: string | null;
+  toolCallNames: string[];
+  hasToolCalls: boolean;
+  timestamp: string;
+}
+
+/**
+ * Live SSE trace entries captured for a single step during a run.
+ * Mirrors the data the backend emits via `agent-iteration` and
+ * `tool-call` events; the UI merges them with the post-run
+ * `iterations` / `toolInvocations` arrays when the run finishes.
+ */
+export interface AgentStepLiveTrace {
+  stepName: string;
+  iterations: AgentIterationTrace[];
+  toolCalls: AgentToolCall[];
+  /**
+   * When `true` the trace was already persisted to the diagnostics
+   * store, so the UI can stop appending live events and render the
+   * (authoritative) backend version.
+   */
+  persisted: boolean;
+}
+
 
 export interface WorkflowVariableDebugInfo {
   rawValue: string;
