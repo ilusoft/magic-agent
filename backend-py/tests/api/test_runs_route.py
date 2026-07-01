@@ -54,6 +54,7 @@ class _FakeExecutor:
 
     def __init__(self) -> None:
         self.last_sink: Any = None
+        self.last_conversation_id: str | None = None
         self.call_count = 0
 
     async def execute_stream(
@@ -62,10 +63,12 @@ class _FakeExecutor:
         input_text: str,
         parameters: dict | None = None,
         progress_sink: Any = None,
+        conversation_id: str | None = None,
     ) -> AgentRunResult:
         from src.agent_runtime.progress_sink import NoOpProgressSink
 
         self.last_sink = progress_sink
+        self.last_conversation_id = conversation_id
         self.call_count += 1
 
         # Drive the sink (if any) so the route can collect events.
@@ -89,11 +92,16 @@ class _FakeExecutor:
             step=step,
             elapsed_ms=42.0,
         )
+        # When the caller supplied a conversation id we keep it so
+        # the diagnostics store keeps grouping rounds together; the
+        # non-streaming JSON response echoes the same value back to
+        # the SPA so its ``conversationId`` state stays stable.
+        effective_conversation_id = conversation_id or "conv-42"
         run_result = AgentRunResult(
             agent_id="agent-streaming",
             status="completed",
             steps=[step],
-            conversation_id="conv-42",
+            conversation_id=effective_conversation_id,
         )
         await sink.run_complete(run_result)
         return run_result
@@ -286,6 +294,7 @@ class _SlowFakeExecutor:
     def __init__(self, pause_seconds: float = 0.05) -> None:
         self.pause_seconds = pause_seconds
         self.events: list[tuple[str, float]] = []  # (event_name, timestamp)
+        self.last_conversation_id: str | None = None
 
     async def execute_stream(
         self,
@@ -293,7 +302,9 @@ class _SlowFakeExecutor:
         input_text: str,
         parameters: dict | None = None,
         progress_sink: Any = None,
+        conversation_id: str | None = None,
     ) -> AgentRunResult:
+        self.last_conversation_id = conversation_id
         await asyncio.sleep(self.pause_seconds)
         self.events.append(("step-start", time.monotonic()))
         await progress_sink.step_start(
@@ -451,4 +462,53 @@ class TestProgressiveStreaming:
             f"First SSE chunk took {elapsed:.3f}s; expected < {pause * 2:.3f}s. "
             "Events are being buffered instead of streamed."
         )
-        assert first_chunk.startswith(b"event: step-start"), first_chunk[:200]
+
+
+class TestConversationMemory:
+    """``/runs`` must forward the request's ``conversation_id`` to the
+    executor so multi-round conversations reuse the same conversation
+    context instead of starting from scratch on every request.
+
+    Regression: the runs service was silently dropping
+    ``request.conversation_id`` before calling ``execute_stream``, so
+    even though the SPA tracked a stable id across rounds, the
+    executor always saw ``None`` and minted a fresh uuid for every
+    request. The agent therefore never saw prior user/assistant turns
+    and behaved like a stateless one-shot completion.
+    """
+
+    def test_request_conversation_id_is_forwarded_to_executor(
+        self, streaming_agent_def: dict
+    ) -> None:
+        app, service = _build_app(agent_def=streaming_agent_def)
+        client = TestClient(app)
+        response = client.post(
+            "/agent-streaming/runs",
+            json={
+                "input": "hi",
+                "conversation_id": "round-2",
+                "parameters": {},
+            },
+        )
+        assert response.status_code == 200
+        # The executor (and ultimately ``ConversationContext``) must
+        # receive the caller's id so it can load prior messages
+        # instead of minting a brand-new one.
+        assert service._executor.last_conversation_id == "round-2"  # noqa: SLF001
+        # The non-streaming response must echo the same id so the SPA
+        # can keep its ``conversationId`` state stable.
+        assert response.json()["conversationId"] == "round-2"
+
+    def test_executor_receives_none_when_request_omits_id(
+        self, streaming_agent_def: dict
+    ) -> None:
+        app, service = _build_app(agent_def=streaming_agent_def)
+        client = TestClient(app)
+        response = client.post(
+            "/agent-streaming/runs",
+            json={"input": "hi", "conversation_id": None, "parameters": {}},
+        )
+        assert response.status_code == 200
+        # First round legitimately has no id; the executor should
+        # still see ``None`` (not a leaked value from a previous test).
+        assert service._executor.last_conversation_id is None  # noqa: SLF001

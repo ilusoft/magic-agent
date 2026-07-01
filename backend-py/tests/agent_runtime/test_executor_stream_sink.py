@@ -495,6 +495,167 @@ class TestWithStepError:
         assert updated.tool_invocations[1].tool_name == "__step_error__"
 
 
+class TestConversationMemory:
+    """``execute_stream`` must respect the caller-supplied
+    ``conversation_id`` so multi-round conversations reuse the same
+    conversation context.
+
+    Regression: the executor always started with
+    ``conversation_id = None`` and never accepted one from the route
+    layer, so even when the SPA sent a stable id across rounds the
+    agent's ``ConversationContext`` minted a fresh uuid for every
+    request. The LLM therefore never saw prior user/assistant turns.
+    """
+
+    @pytest.mark.asyncio
+    async def test_second_round_loads_prior_messages(self) -> None:
+        """Run the same agent twice with the same ``conversation_id``;
+        the LLM on round 2 must see the user message and the assistant
+        response from round 1 in addition to the new user input.
+        """
+        from src.infrastructure.conversation.store import (
+            InMemoryAgentConversationStore,
+        )
+
+        class _RecordingFactory:
+            def __init__(self) -> None:
+                self.invocations: list[list[str]] = []
+
+            def create_chat_model(self, **_kwargs: Any) -> Any:
+                return self._ChatModel(self)
+
+            class _ChatModel:
+                def __init__(self, outer: "_RecordingFactory") -> None:
+                    self.outer = outer
+
+                async def ainvoke(self, messages: Any) -> Any:
+                    self.outer.invocations.append(
+                        [str(m.content) for m in messages]
+                    )
+
+                    class _Resp:
+                        def __init__(self, content: str) -> None:
+                            self.content = content
+
+                    return _Resp(f"reply-{len(self.outer.invocations)}")
+
+        conv_store = InMemoryAgentConversationStore()
+        factory = _RecordingFactory()
+        executor = WorkflowExecutor(  # type: ignore[arg-type]
+            llm_factory=factory,
+            conversation_store=conv_store,
+        )
+        sink = _RecordingSink()
+
+        agent_def = {
+            "id": "mem-agent",
+            "name": "mem-agent",
+            "defaultParameters": {},
+            "steps": [
+                {
+                    "name": "chat",
+                    "type": "agent",
+                    "parameters": {
+                        "systemPrompt": "you are a helpful assistant",
+                        "message": "round input",
+                    },
+                    "conversation": {"enabled": True},
+                    "outcomes": [
+                        {
+                            "name": "end",
+                            "nextStep": None,
+                            "condition": None,
+                            "endWorkflow": True,
+                            "order": 1,
+                        }
+                    ],
+                    "isStartStep": True,
+                }
+            ],
+        }
+
+        # Round 1: caller has no id yet. The executor mints one and
+        # the agent response gets persisted to the conversation store.
+        round1 = await executor.execute_stream(
+            agent_definition=agent_def,  # type: ignore[arg-type]
+            input_text="hello",
+            progress_sink=sink,
+        )
+        first_conversation_id = round1.conversation_id
+        assert first_conversation_id is not None
+
+        # Round 2: the caller (the runs service, which forwards
+        # ``RunRequest.conversation_id``) reuses the same id. The
+        # ``ConversationContext`` must reload round-1 messages from
+        # the store so the LLM sees them.
+        round2 = await executor.execute_stream(
+            agent_definition=agent_def,  # type: ignore[arg-type]
+            input_text="hello again",
+            progress_sink=sink,
+            conversation_id=first_conversation_id,
+        )
+        assert round2.conversation_id == first_conversation_id
+
+        # Two LLM invocations, one per round.
+        assert len(factory.invocations) == 2
+
+        round2_messages = factory.invocations[1]
+        # The agent step's ``message`` parameter is what gets sent as
+        # the user message to the LLM (``input_text`` is the workflow
+        # input and is only used to resolve ``${{ input }}``
+        # expressions in earlier steps). The system prompt is always
+        # first, then the prior user/assistant turns reloaded from
+        # the conversation store, then the new user message.
+        assert round2_messages == [
+            "you are a helpful assistant",
+            "round input",
+            "reply-1",
+            "round input",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_run_result_carries_caller_supplied_conversation_id(self) -> None:
+        """When the caller supplies a ``conversation_id`` but the step
+        has no ``conversation.enabled`` config, the id must still be
+        propagated onto the returned ``AgentRunResult`` so the
+        diagnostics store groups every round under the same key.
+        """
+        executor = WorkflowExecutor(llm_factory=_StubLLMFactory())  # type: ignore[arg-type]
+        sink = _RecordingSink()
+
+        agent_def = {
+            "id": "diag-agent",
+            "name": "diag-agent",
+            "defaultParameters": {},
+            "steps": [
+                {
+                    "name": "chat",
+                    "type": "agent",
+                    "parameters": {"systemPrompt": "hi", "message": "x"},
+                    "outcomes": [
+                        {
+                            "name": "end",
+                            "nextStep": None,
+                            "condition": None,
+                            "endWorkflow": True,
+                            "order": 1,
+                        }
+                    ],
+                    "isStartStep": True,
+                }
+            ],
+        }
+
+        result = await executor.execute_stream(
+            agent_definition=agent_def,  # type: ignore[arg-type]
+            input_text="x",
+            progress_sink=sink,
+            conversation_id="user-supplied-id",
+        )
+
+        assert result.conversation_id == "user-supplied-id"
+
+
 def test_noop_sink_importable() -> None:
     """Sanity check that the no-op sink is reachable from the
     progress_sink module (the service imports it from there)."""

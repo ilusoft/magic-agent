@@ -120,6 +120,7 @@ class AgentRunsService:
             input_text=request.input,
             parameters=parameters,
             progress_sink=NoOpProgressSink(),
+            conversation_id=request.conversation_id,
         )
         return self._build_workflow_result(run_result)
 
@@ -134,6 +135,11 @@ class AgentRunsService:
         Unlike the previous implementation, the route layer is
         responsible for translating sink events into wire bytes; this
         service just runs the workflow and forwards to the sink.
+
+        The ``request.conversation_id`` is forwarded to the executor so
+        multi-round conversations reuse the same conversation context
+        and the LLM sees prior user/assistant turns instead of starting
+        from scratch on every request.
 
         Args:
             agent_id: Agent identifier
@@ -157,6 +163,7 @@ class AgentRunsService:
             input_text=request.input,
             parameters=parameters,
             progress_sink=progress_sink,
+            conversation_id=request.conversation_id,
         )
 
 

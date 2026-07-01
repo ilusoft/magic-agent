@@ -290,6 +290,7 @@ class WorkflowExecutor:
         input_text: str,
         parameters: dict[str, Any] | None = None,
         progress_sink: Any | None = None,
+        conversation_id: str | None = None,
     ) -> AgentRunResult:
         """Execute a workflow while pushing progress events to a sink.
 
@@ -309,6 +310,14 @@ class WorkflowExecutor:
                 object with the three async methods). ``None`` is
                 equivalent to ``NoOpProgressSink()`` and used for
                 backward-compat callers that don't care about events.
+            conversation_id: Optional conversation ID forwarded by the
+                caller (typically the ``RunRequest.conversation_id``
+                supplied by the SPA on a follow-up turn). When set it
+                is reused by ``ConversationContext`` so the agent
+                step sees the prior user/assistant messages instead
+                of starting from scratch, and it is propagated onto
+                the returned ``AgentRunResult`` so the diagnostics
+                store records every round under the same key.
 
         Returns:
             The final ``AgentRunResult`` (same shape the
@@ -357,7 +366,13 @@ class WorkflowExecutor:
         max_iterations = parameters.get("max_iterations", 50) if parameters else 50
         iteration = 0
         current_step_name: str | None = start_step_name
-        conversation_id: str | None = None
+        # Seed with the caller-supplied conversation id so multi-round
+        # runs reuse the same conversation context. The agent step
+        # will generate a new one if ``conversation.enabled`` is true
+        # and no id was supplied; otherwise the caller's id is
+        # preserved on the returned ``AgentRunResult`` so the
+        # diagnostics store keeps grouping rounds together.
+        conversation_id: str | None = conversation_id
         # Mirrors ``DefaultAgentRunner.lastStepOutput`` in the .NET
         # backend. ``None`` until the first step produces output; from
         # then on it's the previous step's output string, exposed as

@@ -613,4 +613,123 @@ public class ExpressionEvaluatorTests
                 stepInput,
                 lastStepOutput);
         }
+
+    [Fact]
+    public void PlaceholderResolver_DatePreset_TodayResolvesToLocalDate()
+    {
+        // Regression: ``{{ today }}`` previously fell through to
+        // the variable-lookup path, missed, and was returned as
+        // the literal string. The model would then hallucinate
+        // against it (the original symptom on the web-search
+        // agent's system prompt, where the author wrote
+        // ``Current Date Time : dd-mm-yyyy``). The preset layer
+        // turns it into a real current-date substitution.
+        WorkflowPlaceholderResolver.Configure(Evaluator);
+
+        var resolved = WorkflowPlaceholderResolver.ResolveString(
+            "Today is {{ today }}",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+            null,
+            null,
+            null);
+
+        var datePart = resolved["Today is ".Length..];
+        datePart.Should().MatchRegex(@"^\d{4}-\d{2}-\d{2}$",
+            "preset must produce a YYYY-MM-DD local date, got {0}", datePart);
+        // Sanity: the value tracks the host clock. A frozen
+        // constant or a stale test would surface here.
+        var expected = DateTimeOffset.Now.ToString("yyyy-MM-dd",
+            System.Globalization.CultureInfo.InvariantCulture);
+        datePart.Should().Be(expected);
+    }
+
+    [Fact]
+    public void PlaceholderResolver_DatePreset_TodayIsCaseInsensitive()
+    {
+        WorkflowPlaceholderResolver.Configure(Evaluator);
+
+        var resolved = WorkflowPlaceholderResolver.ResolveString(
+            "{{ TODAY }}",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+            null,
+            null,
+            null);
+
+        resolved.Should().MatchRegex(@"^\d{4}-\d{2}-\d{2}$");
+    }
+
+    [Theory]
+    [InlineData("dd-mm-yyyy", "dd-MM-yyyy")]
+    [InlineData("yyyy-mm-dd", "yyyy-MM-dd")]
+    [InlineData("mm/dd/yyyy", "MM/dd/yyyy")]
+    [InlineData("dd/mm/yyyy", "dd/MM/yyyy")]
+    [InlineData("yyyy/mm/dd", "yyyy/MM/dd")]
+    [InlineData("mm-dd-yyyy", "MM-dd-yyyy")]
+    public void PlaceholderResolver_DatePreset_FormatTokensResolveToToday(
+        string preset, string expectedNetFormat)
+    {
+        // The exact placeholder the user pasted into the
+        // web-search agent's system prompt. ``dd-mm-yyyy`` is
+        // the canonical example — the rest are common
+        // alternatives so a workflow author who writes the
+        // date in their own locale's convention still gets a
+        // working current-date substitution.
+        WorkflowPlaceholderResolver.Configure(Evaluator);
+
+        var resolved = WorkflowPlaceholderResolver.ResolveString(
+            "{{ " + preset + " }}",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+            null,
+            null,
+            null);
+
+        var expected = DateTimeOffset.Now.ToString(expectedNetFormat,
+            System.Globalization.CultureInfo.InvariantCulture);
+        resolved.Should().Be(expected);
+    }
+
+    [Fact]
+    public void PlaceholderResolver_DatePreset_NowReturnsIsoDatetime()
+    {
+        WorkflowPlaceholderResolver.Configure(Evaluator);
+
+        var resolved = WorkflowPlaceholderResolver.ResolveString(
+            "{{ now }}",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+            null,
+            null,
+            null);
+
+        // ISO 8601 round-trip form: ``2026-06-30T23:33:50.6016540+00:00``
+        DateTimeOffset.TryParse(resolved,
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.RoundtripKind,
+            out var parsed).Should().BeTrue(
+            "preset 'now' must produce a parseable ISO 8601 string, got {0}", resolved);
+        parsed.Offset.Should().Be(TimeSpan.Zero);
+    }
+
+    [Fact]
+    public void PlaceholderResolver_DatePreset_DoesNotHijackVariableLookup()
+    {
+        // The preset layer is purely additive — a non-preset
+        // key must still go through the normal variable
+        // lookup. If a future change accidentally hijacks
+        // arbitrary identifiers, this test catches it.
+        WorkflowPlaceholderResolver.Configure(Evaluator);
+
+        var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["foo"] = "bar",
+        };
+
+        var resolved = WorkflowPlaceholderResolver.ResolveString(
+            "{{ foo }}",
+            variables,
+            null,
+            null,
+            null);
+
+        resolved.Should().Be("bar");
+    }
 }
