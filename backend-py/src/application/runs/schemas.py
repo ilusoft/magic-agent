@@ -17,10 +17,24 @@ from src.application.agents.run_result import AgentRunResult
 
 
 class RunRequest(BaseModel):
-    """Request to trigger an agent run."""
+    """Request to trigger an agent run.
+
+    The SPA sends ``conversationId`` (camelCase) on follow-up turns
+    so multi-round conversations reuse the same conversation context;
+    the schema therefore accepts both the camelCase alias and the
+    snake_case field name (``populate_by_name=True``). Without the
+    alias Pydantic v2 silently drops the unknown field and every
+    round is treated as a fresh conversation.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
 
     input: str = Field(description="User input to the agent")
-    conversation_id: str | None = Field(default=None, description="Conversation ID")
+    conversation_id: str | None = Field(
+        default=None,
+        alias="conversationId",
+        description="Conversation ID forwarded by the SPA on follow-up turns",
+    )
     parameters: dict[str, Any] = Field(default_factory=dict, description="Run parameters")
 
 
