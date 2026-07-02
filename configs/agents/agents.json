@@ -1,15 +1,58 @@
 {
+  "llmProfiles": {
+    "multi-language-translator-qwen-local-default": {
+      "apiKey": "C2BI6MWzkBS2zvvarw2S",
+      "baseUrl": "http://127.0.0.1:8000/v1",
+      "model": "Qwen3.6-35B-A3B-OptiQ-4bit",
+      "provider": "openai-compatible",
+      "temperature": "1"
+    },
+    "multi-language-translator-azopenai-default": {
+      "apiVersion": "2024-12-01-preview",
+      "deployment": "gpt-5-mini",
+      "endpoint": "https://jorge-mafrq1ph-eastus2.cognitiveservices.azure.com/",
+      "provider": "azure-openai",
+      "temperature": "1",
+      "apiKey": "${AZURE_OPENAI_API_KEY}"
+    }
+  },
+  "tools": {
+    "tavily-mcp": {
+      "id": "tavily-mcp",
+      "type": "mcp",
+      "name": "TavilyWebSearch",
+      "description": "Tavily MCP server providing web search, extract, crawl, and map tools.",
+      "serverUrl": "https://mcp.tavily.com/mcp/?tavilyApiKey=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",
+      "protocol": "auto",
+      "allowedTools": [
+        "tavily_search",
+        "tavily_extract"
+      ],
+      "actions": [
+        {
+          "name": "web_search",
+          "description": "Search the public web for up-to-date information about a query. Use this when you need recent facts, news, or references.",
+          "parameters": {
+            "tool": "tavily_search"
+          }
+        },
+        {
+          "name": "fetch_page",
+          "description": "Fetch and extract the full text content from a list of URLs returned by web_search.",
+          "parameters": {
+            "tool": "tavily_extract"
+          }
+        }
+      ],
+      "forwardAuthorizationHeader": false,
+      "stopOnToolInitError": false
+    }
+  },
   "agents": [
     {
       "id": "multi-language-translator-qwen-local",
-      "name": "Multi Language Translator - Qwen Local LLM",
+      "name": "Translator - Local LLM",
       "description": "Agent to translate text into multiple languages (local qwen 3.5 via OpenAI-compatible endpoint)",
-      "baseUrl": "http://127.0.0.1:8000/v1",
-      "model": "Qwen3.6-35B-A3B-OptiQ-4bit",
-      "defaultParameters": {
-        "temperature": "1",
-        "apiKey": "C2BI6MWzkBS2zvvarw2S"
-      },
       "steps": [
         {
           "name": "general chat agent",
@@ -19,8 +62,6 @@
             "message": "{{var.originalInput}}"
           },
           "variableTypes": {},
-          "provider": "openai-compatible",
-          "options": {},
           "conversation": {
             "enabled": true
           },
@@ -45,7 +86,10 @@
               "order": 1
             }
           ],
-          "isStartStep": false
+          "isStartStep": false,
+          "llmConfig": {
+            "profileId": "multi-language-translator-qwen-local-default"
+          }
         },
         {
           "name": "set-initial-vars",
@@ -62,8 +106,6 @@
             "iterator": "number",
             "translations": "json"
           },
-          "provider": "openai-compatible",
-          "options": {},
           "conversation": null,
           "tools": [],
           "stopOnToolError": false,
@@ -90,8 +132,6 @@
             "translations": "json",
             "combinedOutput": "string"
           },
-          "provider": "openai-compatible",
-          "options": {},
           "conversation": null,
           "tools": [],
           "stopOnToolError": false,
@@ -114,8 +154,6 @@
             "message": "{{var.combinedOutput}}"
           },
           "variableTypes": {},
-          "provider": "openai-compatible",
-          "options": {},
           "conversation": null,
           "tools": [],
           "stopOnToolError": false,
@@ -142,8 +180,6 @@
             "iterator": "number",
             "translations": "json"
           },
-          "provider": "openai-compatible",
-          "options": {},
           "conversation": null,
           "tools": [],
           "stopOnToolError": false,
@@ -162,8 +198,11 @@
           "isStartStep": false
         }
       ],
-      "tools": [],
-      "ViewLayout": {
+      "streaming": {
+        "enabled": true,
+        "mode": "sse"
+      },
+      "viewLayout": {
         "nodes": {
           "multi-language-translator-qwen-local-start": {
             "x": 247,
@@ -293,22 +332,12 @@
           "zoom": 0.9904646375834294
         }
       },
-      "streaming": {
-        "enabled": true,
-        "mode": "sse"
-      }
+      "defaultParameters": {}
     },
     {
       "id": "web-search-tavily-qwen-local",
-      "name": "Web Search Agent - Tavily MCP + Qwen Local LLM",
+      "name": "Web Search Agent - Local LLM",
       "description": "Answers user questions by searching the web via the Tavily MCP, using the local Qwen LLM as the chat backend.",
-      "provider": "openai-compatible",
-      "baseUrl": "http://127.0.0.1:8000/v1",
-      "model": "Qwen3.6-35B-A3B-OptiQ-4bit",
-      "defaultParameters": {
-        "temperature": "1",
-        "apiKey": "C2BI6MWzkBS2zvvarw2S"
-      },
       "steps": [
         {
           "name": "set-initial-vars",
@@ -319,8 +348,6 @@
           "variableTypes": {
             "userQuestion": "string"
           },
-          "provider": "openai-compatible",
-          "options": {},
           "conversation": null,
           "tools": [],
           "stopOnToolError": false,
@@ -340,7 +367,7 @@
           "name": "web-search-agent",
           "type": "agent",
           "parameters": {
-            "systemPrompt": "You are a research assistant with access to the Tavily web search MCP tools. \n\nCurrent Date Time : ${{ today }}\n\nTo answer the user's question: \n\n(1) call web_search with a focused query to find the most relevant and recent sources\n(2) optionally call fetch_page on the top URLs to read their full content\n(3) synthesize a concise, well-cited answer in plain text. Always prefer authoritative and current sources. \n\nNever invent facts — when the web does not contain an answer, say so explicitly.\nIf you cannot find an answer with a maximum of 2 research calls to the tools don't try any further and consolidate the facts found or ask for clarifications to the user.",
+            "systemPrompt": "You are a research assistant with access to the Tavily web search MCP tools. \n\nCurrent Date Time : ${{ today }}\n\nTo answer the user's question: \n\n(1) call web_search with a focused query to find the most relevant and recent sources\n(2) optionally call fetch_page on the top URLs to read their full content\n(3) synthesize a concise, well-cited answer in plain text. Always prefer authoritative and current sources. \n\nIMPORTANT RULES:\n- Never invent facts — when the web does not contain an answer, say so explicitly.\n- If you cannot find an answer with a maximum of 2 research calls to the tools don't try any further and consolidate the facts found or ask for clarifications to the user.\n\nOUTPUT FORMAT:\n- Consolidate the results and try to answer as brief as possible. Don't show the user all the details of the research just the elaborated answer.",
             "message": "{{var.userQuestion}}"
           },
           "conversation": {
@@ -357,7 +384,10 @@
           ],
           "tools": [
             "tavily-mcp"
-          ]
+          ],
+          "llmConfig": {
+            "profileId": "multi-language-translator-qwen-local-default"
+          }
         },
         {
           "name": "output-echo",
@@ -366,8 +396,6 @@
             "message": "{{lastOutput}}"
           },
           "variableTypes": {},
-          "provider": "openai-compatible",
-          "options": {},
           "conversation": null,
           "tools": [],
           "stopOnToolError": false,
@@ -384,39 +412,11 @@
           "isStartStep": false
         }
       ],
-      "tools": [
-        {
-          "id": "tavily-mcp",
-          "type": "mcp",
-          "name": "TavilyWebSearch",
-          "description": "Tavily MCP server providing web search, extract, crawl, and map tools.",
-          "serverUrl": "https://mcp.tavily.com/mcp/?tavilyApiKey=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",
-          "protocol": "auto",
-          "allowedTools": [
-            "tavily_search",
-            "tavily_extract"
-          ],
-          "actions": [
-            {
-              "name": "web_search",
-              "description": "Search the public web for up-to-date information about a query. Use this when you need recent facts, news, or references.",
-              "parameters": {
-                "tool": "tavily_search"
-              }
-            },
-            {
-              "name": "fetch_page",
-              "description": "Fetch and extract the full text content from a list of URLs returned by web_search.",
-              "parameters": {
-                "tool": "tavily_extract"
-              }
-            }
-          ],
-          "forwardAuthorizationHeader": false,
-          "stopOnToolInitError": false
-        }
-      ],
-      "ViewLayout": {
+      "streaming": {
+        "enabled": true,
+        "mode": "sse"
+      },
+      "viewLayout": {
         "nodes": {
           "web-search-tavily-qwen-local-start": {
             "x": 71,
@@ -442,10 +442,6 @@
             "x": 71,
             "y": 327,
             "handles": null
-          },
-          "web-search-tavily-qwen-local-tool-tavily-mcp": {
-            "x": 340,
-            "y": -1
           }
         },
         "edges": {
@@ -490,21 +486,12 @@
           "zoom": 1.2475768020437288
         }
       },
-      "streaming": {
-        "enabled": true,
-        "mode": "sse"
-      }
+      "defaultParameters": {}
     },
     {
       "id": "multi-language-translator-azopenai",
-      "name": "Multi Language Translator - Azure Open AI",
+      "name": "Translator - Azure OpenAI",
       "description": "Agent to translate text into multiple languages",
-      "endpoint": "https://jorge-mafrq1ph-eastus2.cognitiveservices.azure.com/",
-      "deployment": "gpt-5-mini",
-      "apiVersion": "2024-12-01-preview",
-      "defaultParameters": {
-        "temperature": "1"
-      },
       "steps": [
         {
           "name": "general chat agent",
@@ -514,8 +501,6 @@
             "message": "{{var.originalInput}}"
           },
           "variableTypes": {},
-          "provider": "azure-openai",
-          "options": {},
           "conversation": {
             "enabled": true
           },
@@ -540,7 +525,10 @@
               "order": 1
             }
           ],
-          "isStartStep": false
+          "isStartStep": false,
+          "llmConfig": {
+            "profileId": "multi-language-translator-azopenai-default"
+          }
         },
         {
           "name": "set-initial-vars",
@@ -557,8 +545,6 @@
             "iterator": "number",
             "translations": "json"
           },
-          "provider": "azure-openai",
-          "options": {},
           "conversation": null,
           "tools": [],
           "stopOnToolError": false,
@@ -585,8 +571,6 @@
             "translations": "json",
             "combinedOutput": "string"
           },
-          "provider": "azure-openai",
-          "options": {},
           "conversation": null,
           "tools": [],
           "stopOnToolError": false,
@@ -609,8 +593,6 @@
             "message": "{{var.combinedOutput}}"
           },
           "variableTypes": {},
-          "provider": "azure-openai",
-          "options": {},
           "conversation": null,
           "tools": [],
           "stopOnToolError": false,
@@ -637,8 +619,6 @@
             "iterator": "number",
             "translations": "json"
           },
-          "provider": "azure-openai",
-          "options": {},
           "conversation": null,
           "tools": [],
           "stopOnToolError": false,
@@ -657,8 +637,11 @@
           "isStartStep": false
         }
       ],
-      "tools": [],
-      "ViewLayout": {
+      "streaming": {
+        "enabled": true,
+        "mode": "sse"
+      },
+      "viewLayout": {
         "viewport": {
           "position": {
             "x": 1126.0202377403405,
@@ -722,10 +705,7 @@
           }
         }
       },
-      "streaming": {
-        "enabled": true,
-        "mode": "sse"
-      }
+      "defaultParameters": {}
     }
   ]
 }

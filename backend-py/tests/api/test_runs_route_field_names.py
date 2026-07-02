@@ -26,6 +26,9 @@ class _FakeProvider:
     async def load_agent(self, agent_id: str) -> dict | None:
         return self._agents.get(agent_id)
 
+    async def get_full_document(self) -> dict:
+        return {"agents": list(self._agents.values())}
+
 
 class _FakeExecutor:
     def __init__(self) -> None:
@@ -38,6 +41,7 @@ class _FakeExecutor:
         parameters: dict | None = None,
         progress_sink=None,
         conversation_id: str | None = None,
+        document: dict | None = None,
     ) -> AgentRunResult:
         self.last_conversation_id = conversation_id
         step = AgentStepExecutionResult(

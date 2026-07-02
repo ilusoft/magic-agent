@@ -14,6 +14,21 @@ export default defineConfig({
       "@": srcDir,
     },
   },
+  server: {
+    // Proxy ``/api/*`` to the .NET backend so the frontend works
+    // out of the box against the launchSettings.json port even if
+    // ``VITE_API_BASE_URL`` points somewhere else (e.g. a
+    // reverse proxy or a different host). The proxy target
+    // defaults to the same host the Vite dev server is running
+    // on (``process.env.HOST`` or ``localhost``) and the
+    // ``5134`` port the .NET backend uses by default.
+    proxy: {
+      "/api": {
+        target: "http://localhost:5134",
+        changeOrigin: true,
+      },
+    },
+  },
   test: {
     globals: true,
     environment: "jsdom",

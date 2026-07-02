@@ -11,7 +11,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from src.config import get_settings
 from src.lib.logging import configure_logging
-from src.api.routes import agents, runs, workflows, health
+from src.api.routes import agent_definitions, agents, health, runs, workflows
 
 
 @asynccontextmanager
@@ -46,6 +46,7 @@ def create_app() -> FastAPI:
 
     # Include routers
     app.include_router(health.router, tags=["Health"])
+    app.include_router(agent_definitions.router, prefix="/api/agent-definitions", tags=["Agent Definitions"])
     app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])
     app.include_router(runs.router, prefix="/api/agents", tags=["Runs"])
     app.include_router(workflows.router, prefix="/api/workflows", tags=["Workflows"])

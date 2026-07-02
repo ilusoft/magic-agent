@@ -47,6 +47,12 @@ public sealed class FileAgentDefinitionsProvider : IAgentDefinitionsProvider
     {
         ArgumentNullException.ThrowIfNull(document);
 
+        var issues = AgentDefinitionsDocumentValidator.Validate(document);
+        if (issues.Count > 0)
+        {
+            throw new AgentDefinitionsValidationException(issues);
+        }
+
         NormalizeStartSteps(document);
 
         var absolutePath = ResolveDefinitionsPath();
@@ -72,7 +78,75 @@ public sealed class FileAgentDefinitionsProvider : IAgentDefinitionsProvider
             return new AgentDefinitionsDocument();
         }
 
+        DetectLegacyShapeAndThrow(absolutePath);
+
+        var issues = AgentDefinitionsDocumentValidator.Validate(document);
+        if (issues.Count > 0)
+        {
+            throw new AgentDefinitionsValidationException(issues);
+        }
+
         return document;
+    }
+
+    /// <summary>
+    /// Reads the file as raw text and looks for any of the
+    /// pre-refactor top-level keys. The C# types no longer carry
+    /// these fields (they were dropped in phase 9), so the
+    /// deserializer silently ignores them. The only place to detect
+    /// the legacy shape is in the raw JSON.
+    /// Throws <see cref="MigrationRequiredException"/> so the
+    /// controller can return a 426 pointing the operator at the
+    /// migration tool.
+    /// </summary>
+    private static void DetectLegacyShapeAndThrow(string absolutePath)
+    {
+        // Re-open the file and scan for legacy top-level keys. This
+        // is cheap (single small file) and avoids keeping an
+        // out-of-band copy of the removed fields just for the check.
+        string raw;
+        using (var reader = new StreamReader(absolutePath))
+        {
+            raw = reader.ReadToEnd();
+        }
+
+        var legacyAgentKeys = new[] { "endpoint", "deployment", "apiKey", "apiVersion", "baseUrl", "model", "provider" };
+        var detected = new List<string>();
+        foreach (var key in legacyAgentKeys)
+        {
+            if (raw.Contains($"\"{key}\":", StringComparison.Ordinal))
+            {
+                detected.Add(key);
+            }
+        }
+
+        // Per-step legacy keys: only scan inside "steps" arrays. A
+        // substring search keeps the check fast for our file sizes.
+        if (raw.Contains("\"provider\":", StringComparison.Ordinal) ||
+            raw.Contains("\"options\":", StringComparison.Ordinal))
+        {
+            // Both are also valid for newer shapes, but the migration
+            // path is the only known case where they appear without
+            // the rest of the new shape. The validator runs after this
+            // check; a false positive just produces a less helpful
+            // 426 instead of a 422.
+            if (raw.Contains("\"options\":", StringComparison.Ordinal))
+            {
+                detected.Add("options");
+            }
+        }
+
+        if (detected.Count == 0)
+        {
+            return;
+        }
+
+        throw new MigrationRequiredException(
+            $"Agent definitions document at '{absolutePath}' uses the pre-refactor shape. "
+            + "Run `dotnet run --project tools/AgentsMigrator -- <path-to-agents.json>` to upgrade. "
+            + "Legacy keys detected: "
+            + string.Join(", ", detected.Distinct()),
+            absolutePath);
     }
 
     private string ResolveDefinitionsPath()

@@ -10,6 +10,11 @@ namespace MagicAgent.Api.Tests;
 
 public sealed class TestApiFactory : WebApplicationFactory<Program>
 {
+    public TestApiFactory()
+    {
+        TestProvider = new TestAgentDefinitionsProvider();
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.ConfigureTestServices(services =>
@@ -17,12 +22,19 @@ public sealed class TestApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IAgentDefinitionsProvider>();
             services.RemoveAll<IAgentDefinitionValueResolver>();
 
-            services.AddSingleton<IAgentDefinitionsProvider>(_ => new TestAgentDefinitionsProvider());
+            services.AddSingleton<IAgentDefinitionsProvider>(_ => TestProvider);
             services.AddSingleton<IAgentDefinitionValueResolver, PassthroughAgentDefinitionValueResolver>();
         });
     }
 
-    private sealed class TestAgentDefinitionsProvider : IAgentDefinitionsProvider
+    /// <summary>
+    /// Exposed so cascade-delete integration tests can seed the
+    /// document with a referenced tool or profile before exercising
+    /// the per-section PUT endpoints.
+    /// </summary>
+    public TestAgentDefinitionsProvider TestProvider { get; }
+
+    public sealed class TestAgentDefinitionsProvider : IAgentDefinitionsProvider
     {
         private static readonly AgentDefinition TestAgentDefinition = new()
         {
@@ -44,7 +56,6 @@ public sealed class TestApiFactory : WebApplicationFactory<Program>
                         ["message"] = "[agent-framework-fallback] {{input}}",
                     },
                     VariableTypes = new Dictionary<string, WorkflowVariableDataType>(StringComparer.OrdinalIgnoreCase),
-                    Options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
                     Outcomes = new List<AgentStepOutcomeDefinition>
                     {
                         new()
@@ -59,18 +70,33 @@ public sealed class TestApiFactory : WebApplicationFactory<Program>
                     IsStartStep = true,
                 },
             },
-            Tools = new List<AgentToolDefinition>(),
         };
 
-        public Task<AgentDefinitionsDocument> GetDefinitionsAsync(CancellationToken cancellationToken = default)
+        private AgentDefinitionsDocument _document = new()
         {
-            var document = new AgentDefinitionsDocument
+            LlmProfiles = new Dictionary<string, AgentLlmProfileDefinition>(StringComparer.OrdinalIgnoreCase)
             {
-                Agents = new List<AgentDefinition> { TestAgentDefinition },
-            };
+                ["test-azure"] = new AgentLlmProfileDefinition
+                {
+                    Provider = "azure-openai",
+                    Endpoint = "https://test.openai.azure.com/",
+                    Deployment = "test-deployment",
+                    ApiKey = "test-api-key-12345678",
+                },
+            },
+            Tools = new Dictionary<string, AgentToolDefinition>(StringComparer.OrdinalIgnoreCase),
+            Agents = new List<AgentDefinition> { TestAgentDefinition },
+        };
 
-            return Task.FromResult(document);
-        }
+        /// <summary>
+        /// Replace the current document. Used by the cascade-delete
+        /// integration tests to seed a document with a referenced
+        /// tool or profile before exercising the PUT endpoints.
+        /// </summary>
+        public void SetDocument(AgentDefinitionsDocument document) => _document = document;
+
+        public Task<AgentDefinitionsDocument> GetDefinitionsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(_document);
 
         public Task<AgentDefinition?> GetAgentDefinitionAsync(string agentId, CancellationToken cancellationToken = default)
         {
@@ -82,7 +108,10 @@ public sealed class TestApiFactory : WebApplicationFactory<Program>
         }
 
         public Task SaveDefinitionsAsync(AgentDefinitionsDocument document, CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
+        {
+            _document = document;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class PassthroughAgentDefinitionValueResolver : IAgentDefinitionValueResolver

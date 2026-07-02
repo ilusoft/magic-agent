@@ -176,19 +176,19 @@ export function useWorkflowCanvas({
           return draft;
         }
 
-        if (!agent.ViewLayout) {
-          agent.ViewLayout = { nodes: {} };
+        if (!agent.viewLayout) {
+          agent.viewLayout = { nodes: {} };
         }
 
-        if (!agent.ViewLayout.nodes) {
-          agent.ViewLayout.nodes = {};
+        if (!agent.viewLayout.nodes) {
+          agent.viewLayout.nodes = {};
         }
 
         const layoutKeys = getLayoutKeysForNode(workflowNode);
         layoutKeys.forEach((key) => {
-          const existingLayout = agent.ViewLayout!.nodes![key];
+          const existingLayout = agent.viewLayout!.nodes![key];
 
-          agent.ViewLayout!.nodes![key] = {
+          agent.viewLayout!.nodes![key] = {
             x: position.x,
             y: position.y,
             handles: existingLayout?.handles,
@@ -288,10 +288,10 @@ export function useWorkflowCanvas({
         (candidate) => candidate.id === activeWorkflowId
       );
 
-      if (!agent?.ViewLayout) {
+      if (!agent?.viewLayout) {
         if (workflowDebugLogging) {
           console.info(
-            "[WorkflowCanvas] layout cleanup skipped (no ViewLayout)",
+            "[WorkflowCanvas] layout cleanup skipped (no viewLayout)",
             {
               workflowId: activeWorkflowId,
             }
@@ -312,47 +312,47 @@ export function useWorkflowCanvas({
 
       let mutated = false;
 
-      if (agent.ViewLayout.nodes) {
+      if (agent.viewLayout.nodes) {
         const allowedNodeKeys = new Set<string>();
         graph.nodes.forEach((node) => {
           getLayoutKeysForNode(node).forEach((key) => allowedNodeKeys.add(key));
         });
 
-        Object.keys(agent.ViewLayout.nodes).forEach((key) => {
+        Object.keys(agent.viewLayout.nodes).forEach((key) => {
           if (!allowedNodeKeys.has(key)) {
-            delete agent.ViewLayout!.nodes![key];
+            delete agent.viewLayout!.nodes![key];
             mutated = true;
           }
         });
 
-        if (Object.keys(agent.ViewLayout.nodes).length === 0) {
-          delete agent.ViewLayout.nodes;
+        if (Object.keys(agent.viewLayout.nodes).length === 0) {
+          delete agent.viewLayout.nodes;
           mutated = true;
         }
       }
 
-      if (agent.ViewLayout.edges) {
+      if (agent.viewLayout.edges) {
         const allowedEdgeKeys = new Set(graph.edges.map((edge) => edge.id));
 
-        Object.keys(agent.ViewLayout.edges).forEach((key) => {
+        Object.keys(agent.viewLayout.edges).forEach((key) => {
           if (!allowedEdgeKeys.has(key)) {
-            delete agent.ViewLayout!.edges![key];
+            delete agent.viewLayout!.edges![key];
             mutated = true;
           }
         });
 
-        if (Object.keys(agent.ViewLayout.edges).length === 0) {
-          delete agent.ViewLayout.edges;
+        if (Object.keys(agent.viewLayout.edges).length === 0) {
+          delete agent.viewLayout.edges;
           mutated = true;
         }
       }
 
       if (
-        !agent.ViewLayout.nodes &&
-        !agent.ViewLayout.edges &&
-        !agent.ViewLayout.viewport
+        !agent.viewLayout.nodes &&
+        !agent.viewLayout.edges &&
+        !agent.viewLayout.viewport
       ) {
-        delete agent.ViewLayout;
+        delete agent.viewLayout;
         mutated = true;
       }
 
@@ -454,24 +454,24 @@ export function useWorkflowCanvas({
           return draft;
         }
 
-        if (!agent.ViewLayout) {
-          agent.ViewLayout = { nodes: {} };
+        if (!agent.viewLayout) {
+          agent.viewLayout = { nodes: {} };
         }
 
-        if (!agent.ViewLayout.nodes) {
-          agent.ViewLayout.nodes = {};
+        if (!agent.viewLayout.nodes) {
+          agent.viewLayout.nodes = {};
         }
 
         const layoutKeys = getLayoutKeysForNode(workflowNode);
 
         layoutKeys.forEach((key) => {
-          const existingLayout = agent.ViewLayout!.nodes![key];
+          const existingLayout = agent.viewLayout!.nodes![key];
           const basePosition = existingLayout ?? {
             x: workflowNode.position?.x ?? 0,
             y: workflowNode.position?.y ?? 0,
           };
 
-          agent.ViewLayout!.nodes![key] = {
+          agent.viewLayout!.nodes![key] = {
             x: basePosition.x,
             y: basePosition.y,
             handles: {
@@ -514,15 +514,15 @@ export function useWorkflowCanvas({
           return draft;
         }
 
-        if (!agent.ViewLayout) {
-          agent.ViewLayout = { nodes: {}, edges: {} };
+        if (!agent.viewLayout) {
+          agent.viewLayout = { nodes: {}, edges: {} };
         }
 
-        if (!agent.ViewLayout.edges) {
-          agent.ViewLayout.edges = {};
+        if (!agent.viewLayout.edges) {
+          agent.viewLayout.edges = {};
         }
 
-        const existing = agent.ViewLayout.edges[edgeId]?.controlPoints ?? [];
+        const existing = agent.viewLayout.edges[edgeId]?.controlPoints ?? [];
         const next = [...existing];
 
         if (index >= next.length) {
@@ -531,7 +531,7 @@ export function useWorkflowCanvas({
 
         next[index] = snapEnabled ? snapPositionToGrid(position) : position;
 
-        agent.ViewLayout.edges[edgeId] = {
+        agent.viewLayout.edges[edgeId] = {
           controlPoints: next.filter(
             (point): point is { x: number; y: number } => Boolean(point)
           ),
@@ -565,15 +565,15 @@ export function useWorkflowCanvas({
           return draft;
         }
 
-        if (!agent.ViewLayout) {
-          agent.ViewLayout = { nodes: {}, edges: {} };
+        if (!agent.viewLayout) {
+          agent.viewLayout = { nodes: {}, edges: {} };
         }
 
-        if (!agent.ViewLayout.edges) {
-          agent.ViewLayout.edges = {};
+        if (!agent.viewLayout.edges) {
+          agent.viewLayout.edges = {};
         }
 
-        const existing = agent.ViewLayout.edges[edgeId]?.controlPoints ?? [];
+        const existing = agent.viewLayout.edges[edgeId]?.controlPoints ?? [];
         const next = [...existing];
 
         next.splice(
@@ -582,7 +582,7 @@ export function useWorkflowCanvas({
           snapEnabled ? snapPositionToGrid(position) : position
         );
 
-        agent.ViewLayout.edges[edgeId] = {
+        agent.viewLayout.edges[edgeId] = {
           controlPoints: next.filter(
             (point): point is { x: number; y: number } => Boolean(point)
           ),
@@ -605,11 +605,11 @@ export function useWorkflowCanvas({
           (candidate) => candidate.id === activeWorkflowId
         );
 
-        if (!agent || !agent.ViewLayout?.edges) {
+        if (!agent || !agent.viewLayout?.edges) {
           return draft;
         }
 
-        const existing = agent.ViewLayout.edges[edgeId]?.controlPoints ?? [];
+        const existing = agent.viewLayout.edges[edgeId]?.controlPoints ?? [];
 
         if (existing.length === 0) {
           return draft;
@@ -619,9 +619,9 @@ export function useWorkflowCanvas({
         next.splice(index, 1);
 
         if (next.length > 0) {
-          agent.ViewLayout.edges[edgeId] = { controlPoints: next };
+          agent.viewLayout.edges[edgeId] = { controlPoints: next };
         } else {
-          delete agent.ViewLayout.edges[edgeId];
+          delete agent.viewLayout.edges[edgeId];
         }
 
         return draft;
@@ -699,11 +699,11 @@ export function useWorkflowCanvas({
           return draft;
         }
 
-        if (!agent.ViewLayout) {
-          agent.ViewLayout = { nodes: {} };
+        if (!agent.viewLayout) {
+          agent.viewLayout = { nodes: {} };
         }
 
-        agent.ViewLayout.viewport = {
+        agent.viewLayout.viewport = {
           position: {
             x: nextViewport.position.x,
             y: nextViewport.position.y,

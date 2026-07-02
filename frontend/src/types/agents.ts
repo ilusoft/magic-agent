@@ -6,67 +6,83 @@ export type WorkflowVariableDataType =
   | "boolean";
 
 export interface AgentDefinitionsDocument {
+  llmProfiles?: Record<string, AgentLlmProfileDefinition>;
+  tools?: Record<string, AgentToolDefinition>;
   agents: AgentDefinition[];
+}
+
+export interface AgentLlmProfileDefinition {
+  provider: string;
+  endpoint?: string;
+  deployment?: string;
+  apiVersion?: string;
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+  headers?: Record<string, string>;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export interface AgentStepLlmConfig {
+  profileId?: string;
+  provider?: string;
+  endpoint?: string;
+  deployment?: string;
+  apiVersion?: string;
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+  headers?: Record<string, string>;
+  temperature?: number;
+  maxTokens?: number;
 }
 
 export interface AgentDefinition {
   id: string;
   name: string;
   description?: string;
+  defaultParameters?: Record<string, string>;
+  // Deprecated: LLM config moved to document-level llmProfiles + per-step
+  // llmConfig. Kept optional for the in-flight migration; phase 9 removes
+  // them once configs/agents/agents.json is migrated.
   endpoint?: string;
   deployment?: string;
   apiKey?: string;
   apiVersion?: string;
-  defaultParameters: Record<string, string>;
+  baseUrl?: string;
+  model?: string;
+  provider?: string;
   steps: AgentStepDefinition[];
+  // Deprecated: tool configs moved to document-level tools map; steps
+  // reference them by id. Kept optional for the in-flight migration.
   tools?: AgentToolDefinition[];
-  ViewLayout?: AgentViewLayout;
+  viewLayout?: AgentViewLayout;
   streaming?: AgentStreamingOptions;
-}
-
-export interface AgentStreamingOptions {
-  enabled?: boolean;
-  mode?: string;
-}
-
-export interface AgentViewLayout {
-  nodes?: Record<string, AgentViewLayoutNode>;
-  edges?: Record<string, AgentViewLayoutEdge>;
-  viewport?: AgentViewLayoutViewport;
-}
-
-export type WorkflowHandlePosition = "top" | "right" | "bottom" | "left";
-
-export interface AgentNodeHandlePlacement {
-  input?: WorkflowHandlePosition;
-  outcomes?: WorkflowHandlePosition;
-  tools?: WorkflowHandlePosition;
-}
-
-export interface AgentViewLayoutNode {
-  x: number;
-  y: number;
-  handles?: AgentNodeHandlePlacement;
-}
-
-export interface AgentViewLayoutEdge {
-  controlPoints?: AgentViewLayoutNode[];
-}
-
-export interface AgentViewLayoutViewport {
-  position: AgentViewLayoutNode;
-  zoom: number;
 }
 
 export interface AgentStepDefinition {
   name: string;
   type: string;
-  parameters: Record<string, string>;
+  parameters?: Record<string, string>;
   variableTypes?: Record<string, WorkflowVariableDataType>;
+  // Deprecated: provider moved into llmConfig (or the referenced
+  // profile's provider). Kept optional for the in-flight migration.
+  provider?: string;
+  // Deprecated: options is unused; kept optional for the in-flight
+  // migration.
+  options?: Record<string, string>;
   conversation?: AgentStepConversationOptions;
-  outcomes?: AgentStepOutcomeDefinition[];
+  // References to document-level tool ids. The full tool config
+  // lives in the document's `tools` map.
   tools?: string[];
+  stopOnToolError?: boolean;
+  inputSource?: string;
+  outcomes?: AgentStepOutcomeDefinition[];
   isStartStep?: boolean;
+  // Per-step LLM override. When set, takes precedence over any
+  // workflow-level LLM config (which is gone post-refactor).
+  llmConfig?: AgentStepLlmConfig;
 }
 
 export interface AgentStepConversationOptions {
@@ -93,9 +109,8 @@ export interface AgentToolDefinition {
   serverUrl?: string;
   protocol?: string;
   headers?: Record<string, string>;
-  options?: Record<string, string>;
-  actions?: AgentToolActionDefinition[];
   allowedTools?: string[];
+  actions?: AgentToolActionDefinition[];
   forwardAuthorizationHeader?: boolean;
   authorizationHeaderName?: string;
   stopOnToolInitError?: boolean;
@@ -105,6 +120,85 @@ export interface AgentToolActionDefinition {
   name: string;
   description?: string;
   parameters?: Record<string, string>;
+}
+
+export interface AgentToolAction {
+  name: string;
+  description?: string;
+  parameters?: Record<string, string>;
+}
+
+export interface AgentStepOutcome {
+  name: string;
+  nextStep?: string | null;
+  condition?: { expression?: string } | null;
+  endWorkflow?: boolean;
+  order?: number;
+}
+
+export type WorkflowHandlePosition = "top" | "right" | "bottom" | "left";
+
+export interface AgentNodeHandlePlacement {
+  input?: WorkflowHandlePosition;
+  outcomes?: WorkflowHandlePosition;
+  tools?: WorkflowHandlePosition;
+}
+
+export interface AgentViewLayoutNode {
+  x: number;
+  y: number;
+  handles?: AgentNodeHandlePlacement;
+}
+
+export interface AgentViewLayoutEdge {
+  controlPoints?: AgentViewLayoutNode[];
+}
+
+export interface AgentViewLayoutViewport {
+  position: AgentViewLayoutNode;
+  zoom: number;
+}
+
+export interface AgentViewLayout {
+  nodes?: Record<string, AgentViewLayoutNode>;
+  edges?: Record<string, AgentViewLayoutEdge>;
+  viewport?: AgentViewLayoutViewport;
+}
+
+export interface WorkflowNode {
+  id: string;
+  type: string;
+  position: { x: number; y: number };
+  data: {
+    stepName?: string;
+    label?: string;
+    type?: string;
+    toolId?: string;
+    [key: string]: unknown;
+  };
+}
+
+export interface WorkflowEdge {
+  id: string;
+  source: string;
+  target: string;
+}
+
+export interface AgentStreamingOptions {
+  enabled: boolean;
+  mode?: string;
+}
+
+export interface LLMCallConfig {
+  provider?: string;
+  model?: string | null;
+  endpoint?: string | null;
+  baseUrl?: string | null;
+  deployment?: string | null;
+  apiVersion?: string | null;
+  temperature?: number | string | null;
+  maxTokens?: number | null;
+  apiKeyFingerprint?: string | null;
 }
 
 export interface AgentMessage {
@@ -121,18 +215,6 @@ export interface AgentToolCall {
   errorMessage?: string | null;
   errorDetails?: string | null;
   errorCode?: string | null;
-}
-
-export interface LLMCallConfig {
-  provider?: string | null;
-  model?: string | null;
-  endpoint?: string | null;
-  baseUrl?: string | null;
-  deployment?: string | null;
-  apiVersion?: string | null;
-  temperature?: number | string | null;
-  maxTokens?: number | null;
-  apiKeyFingerprint?: string | null;
 }
 
 export interface AgentStepExecutionResult {
@@ -153,14 +235,6 @@ export interface AgentStepExecutionResult {
   llmConfig?: LLMCallConfig | null;
 }
 
-/**
- * One LLM turn inside an agent step. Mirrors the
- * `AgentIterationTrace` payload emitted by the backend's
- * `agent-iteration` SSE event and persisted on
- * `AgentStepExecutionResult.Iterations`. Used by the trace panel
- * to render the model's intermediate reasoning — including turns
- * where it only requested tools and produced no user-facing text.
- */
 export interface AgentIterationTrace {
   iteration: number;
   content?: string | null;
@@ -169,24 +243,12 @@ export interface AgentIterationTrace {
   timestamp: string;
 }
 
-/**
- * Live SSE trace entries captured for a single step during a run.
- * Mirrors the data the backend emits via `agent-iteration` and
- * `tool-call` events; the UI merges them with the post-run
- * `iterations` / `toolInvocations` arrays when the run finishes.
- */
 export interface AgentStepLiveTrace {
   stepName: string;
   iterations: AgentIterationTrace[];
   toolCalls: AgentToolCall[];
-  /**
-   * When `true` the trace was already persisted to the diagnostics
-   * store, so the UI can stop appending live events and render the
-   * (authoritative) backend version.
-   */
   persisted: boolean;
 }
-
 
 export interface WorkflowVariableDebugInfo {
   rawValue: string;

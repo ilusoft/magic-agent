@@ -44,6 +44,9 @@ class _FakeProvider:
     async def load_agent(self, agent_id: str) -> dict | None:
         return self._agents.get(agent_id)
 
+    async def get_full_document(self) -> dict:
+        return {"agents": list(self._agents.values())}
+
 
 class _FakeExecutor:
     """Stub executor that produces a deterministic result.
@@ -64,6 +67,7 @@ class _FakeExecutor:
         parameters: dict | None = None,
         progress_sink: Any = None,
         conversation_id: str | None = None,
+        document: dict | None = None,
     ) -> AgentRunResult:
         from src.agent_runtime.progress_sink import NoOpProgressSink
 
@@ -303,6 +307,7 @@ class _SlowFakeExecutor:
         parameters: dict | None = None,
         progress_sink: Any = None,
         conversation_id: str | None = None,
+        document: dict | None = None,
     ) -> AgentRunResult:
         self.last_conversation_id = conversation_id
         await asyncio.sleep(self.pause_seconds)

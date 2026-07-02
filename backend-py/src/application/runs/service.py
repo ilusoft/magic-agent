@@ -103,7 +103,8 @@ class AgentRunsService:
             The non-streaming JSON response in the .NET-compatible
             ``AgentWorkflowResult`` shape.
         """
-        agent_def = await self._provider.load_agent(agent_id)
+        document = await self._provider.get_full_document()
+        agent_def = self._find_agent_in_document(document, agent_id)
         if not agent_def:
             from src.application.agents.exceptions import AgentNotFoundError
             raise AgentNotFoundError(agent_id)
@@ -121,6 +122,7 @@ class AgentRunsService:
             parameters=parameters,
             progress_sink=NoOpProgressSink(),
             conversation_id=request.conversation_id,
+            document=document,
         )
         return self._build_workflow_result(run_result)
 
@@ -138,7 +140,7 @@ class AgentRunsService:
 
         The ``request.conversation_id`` is forwarded to the executor so
         multi-round conversations reuse the same conversation context
-        and the LLM sees prior user/assistant turns instead of starting
+        and the LLM sees prior user/assistant messages instead of starting
         from scratch on every request.
 
         Args:
@@ -151,7 +153,8 @@ class AgentRunsService:
         Returns:
             The final ``AgentRunResult``.
         """
-        agent_def = await self._provider.load_agent(agent_id)
+        document = await self._provider.get_full_document()
+        agent_def = self._find_agent_in_document(document, agent_id)
         if not agent_def:
             from src.application.agents.exceptions import AgentNotFoundError
             raise AgentNotFoundError(agent_id)
@@ -164,7 +167,18 @@ class AgentRunsService:
             parameters=parameters,
             progress_sink=progress_sink,
             conversation_id=request.conversation_id,
+            document=document,
         )
+
+    def _find_agent_in_document(
+        self, document: dict[str, Any], agent_id: str
+    ) -> dict[str, Any] | None:
+        """Find an agent definition within a full document by ID or name."""
+        agents = document.get("agents", [])
+        for agent in agents:
+            if agent.get("id") == agent_id or agent.get("name") == agent_id:
+                return agent
+        return None
 
 
 # Singleton

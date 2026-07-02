@@ -13,24 +13,33 @@ internal sealed class AgentToolBuilder
     }
 
     internal async Task<AgentToolContext> BuildAsync(
-        AgentDefinition definition,
+        AgentDefinitionsDocument document,
+        AgentDefinition workflow,
         IReadOnlyDictionary<string, string>? requestHeaders,
         CancellationToken cancellationToken)
     {
-        if (definition.Tools is null || definition.Tools.Count == 0)
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(workflow);
+
+        var referencedToolIds = CollectReferencedToolIds(workflow);
+        if (referencedToolIds.Count == 0)
         {
             return AgentToolContext.Empty;
         }
 
-        var tools = new List<AITool>(definition.Tools.Count);
-        var disposables = new List<IAsyncDisposable>(definition.Tools.Count);
+        var tools = new List<AITool>(referencedToolIds.Count);
+        var disposables = new List<IAsyncDisposable>(referencedToolIds.Count);
         var toolInitializationErrors = new List<ToolInitializationError>();
         var toolsByDefinition = new Dictionary<string, IReadOnlyList<AITool>>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var toolDefinition in definition.Tools)
+        foreach (var toolId in referencedToolIds)
         {
-            if (toolDefinition is null)
+            if (!document.Tools.TryGetValue(toolId, out var toolDefinition) || toolDefinition is null)
             {
+                _logger.LogWarning(
+                    "Agent {AgentId} references unknown tool '{ToolId}' in the document tool pool.",
+                    workflow.Id,
+                    toolId);
                 continue;
             }
 
@@ -40,7 +49,7 @@ internal sealed class AgentToolBuilder
                 try
                 {
                     var (mcpTools, mcpDisposables) = await BuildMcpToolsAsync(
-                        definition,
+                        workflow,
                         toolDefinition,
                         requestHeaders,
                         cancellationToken).ConfigureAwait(false);
@@ -51,7 +60,7 @@ internal sealed class AgentToolBuilder
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to initialize MCP tool {ToolId} for agent {AgentId}.", toolDefinition.Id, definition.Id);
+                    _logger.LogError(ex, "Failed to initialize MCP tool {ToolId} for agent {AgentId}.", toolDefinition.Id, workflow.Id);
                     toolInitializationErrors.Add(new ToolInitializationError(
                         toolDefinition.Id,
                         toolDefinition.Name ?? toolDefinition.Id,
@@ -61,11 +70,49 @@ internal sealed class AgentToolBuilder
             }
             else
             {
-                _logger.LogWarning("Unsupported tool type '{ToolType}' for agent {AgentId}.", toolDefinition.Type, definition.Id);
+                _logger.LogWarning(
+                    "Unsupported tool type '{ToolType}' for tool {ToolId} on agent {AgentId}.",
+                    toolDefinition.Type,
+                    toolDefinition.Id,
+                    workflow.Id);
             }
         }
 
         return new AgentToolContext(tools, disposables, toolInitializationErrors, toolsByDefinition);
+    }
+
+    private static List<string> CollectReferencedToolIds(AgentDefinition workflow)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var ordered = new List<string>();
+
+        if (workflow.Steps is null)
+        {
+            return ordered;
+        }
+
+        foreach (var step in workflow.Steps)
+        {
+            if (step?.Tools is null)
+            {
+                continue;
+            }
+
+            foreach (var toolId in step.Tools)
+            {
+                if (string.IsNullOrWhiteSpace(toolId))
+                {
+                    continue;
+                }
+
+                if (seen.Add(toolId))
+                {
+                    ordered.Add(toolId);
+                }
+            }
+        }
+
+        return ordered;
     }
 
     private async Task<(IReadOnlyList<AITool> Tools, IReadOnlyList<IAsyncDisposable> Disposables)> BuildMcpToolsAsync(

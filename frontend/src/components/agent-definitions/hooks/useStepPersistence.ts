@@ -3,6 +3,7 @@ import { useCallback } from "react";
 import type {
   AgentDefinitionsDocument,
   AgentStepDefinition,
+  AgentStepLlmConfig,
 } from "@/types/agents";
 import type {
   StepFormState,
@@ -23,6 +24,7 @@ interface SaveStepArgs {
   variableTypes: Record<string, WorkflowVariableDataType>;
   conversation?: AgentStepDefinition["conversation"];
   uniqueTools: string[];
+  llmConfig?: AgentStepDefinition["llmConfig"];
 }
 
 interface DeleteStepArgs {
@@ -66,6 +68,7 @@ export function useStepPersistence({
       variableTypes,
       conversation,
       uniqueTools,
+      llmConfig,
     }: SaveStepArgs) => {
       applyDocumentUpdate((draft: AgentDefinitionsDocument) => {
         const agent = draft.agents.find(
@@ -109,6 +112,12 @@ export function useStepPersistence({
           updatedStep.tools = uniqueTools;
         } else {
           delete (updatedStep as Partial<AgentStepDefinition>).tools;
+        }
+
+        if (llmConfig) {
+          updatedStep.llmConfig = llmConfig;
+        } else {
+          delete (updatedStep as Partial<AgentStepDefinition>).llmConfig;
         }
 
         if (existingIndex >= 0) {
@@ -211,6 +220,8 @@ export function useStepPersistence({
       const uniqueTools = Array.from(new Set(stepForm.tools ?? [])).filter(
         (toolId) => toolId.trim().length > 0
       );
+      const llmConfig =
+        stepForm.type === "agent" ? serializeLlmConfig(stepForm.llmConfig) : undefined;
 
       persistStep({
         activeWorkflowId,
@@ -221,6 +232,7 @@ export function useStepPersistence({
         variableTypes,
         conversation,
         uniqueTools,
+        llmConfig,
       });
 
       return { success: true };
@@ -253,4 +265,38 @@ export function useStepPersistence({
     persistStepWithValidation,
     deleteStepWithValidation,
   };
+}
+
+function serializeLlmConfig(
+  form: StepFormState["llmConfig"]
+): AgentStepLlmConfig | undefined {
+  if (form.mode === "inherit") {
+    return undefined;
+  }
+
+  if (form.mode === "profile") {
+    if (!form.profileId.trim()) {
+      return undefined;
+    }
+    return { profileId: form.profileId.trim() };
+  }
+
+  // mode === "inline"
+  const out: AgentStepLlmConfig = {};
+  if (form.provider.trim()) out.provider = form.provider.trim();
+  if (form.endpoint.trim()) out.endpoint = form.endpoint.trim();
+  if (form.deployment.trim()) out.deployment = form.deployment.trim();
+  if (form.apiVersion.trim()) out.apiVersion = form.apiVersion.trim();
+  if (form.baseUrl.trim()) out.baseUrl = form.baseUrl.trim();
+  if (form.model.trim()) out.model = form.model.trim();
+  if (form.apiKey.trim()) out.apiKey = form.apiKey.trim();
+  if (form.temperature.trim()) {
+    const t = Number(form.temperature);
+    if (!Number.isNaN(t)) out.temperature = t;
+  }
+  if (form.maxTokens.trim()) {
+    const n = Number(form.maxTokens);
+    if (!Number.isNaN(n)) out.maxTokens = n;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }

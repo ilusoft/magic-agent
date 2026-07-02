@@ -91,10 +91,6 @@ export function useWorkflowSelection({
       id: "",
       name: "",
       description: "",
-      endpoint: "",
-      deployment: "",
-      apiKey: "",
-      apiVersion: "",
       defaultParameters: [createKeyValueEntry()],
       streamingEnabled: false,
       streamingMode: "sse",
@@ -112,10 +108,6 @@ export function useWorkflowSelection({
       id: agent.id,
       name: agent.name ?? "",
       description: agent.description ?? "",
-      endpoint: agent.endpoint ?? "",
-      deployment: agent.deployment ?? "",
-      apiKey: agent.apiKey ?? "",
-      apiVersion: agent.apiVersion ?? "",
       defaultParameters:
         parameterEntries.length > 0
           ? parameterEntries
@@ -214,8 +206,6 @@ export function useWorkflowSelection({
       }
 
       const trimmedId = workflowForm.id.trim();
-      const trimmedApiKey = workflowForm.apiKey.trim();
-      const trimmedApiVersion = workflowForm.apiVersion.trim();
       const defaultParametersRecord = recordFromEntries(
         workflowForm.defaultParameters
       );
@@ -237,14 +227,9 @@ export function useWorkflowSelection({
             id: trimmedId,
             name: workflowForm.name.trim(),
             description: workflowForm.description.trim() || undefined,
-            endpoint: workflowForm.endpoint.trim() || undefined,
-            deployment: workflowForm.deployment.trim() || undefined,
-            apiKey: trimmedApiKey || undefined,
-            apiVersion: trimmedApiVersion || undefined,
             defaultParameters: defaultParametersRecord,
             steps: [],
-            tools: [],
-            ViewLayout: { nodes: {} },
+            viewLayout: { nodes: {} },
             streaming: workflowForm.streamingEnabled
               ? {
                   enabled: true,
@@ -284,10 +269,6 @@ export function useWorkflowSelection({
             id: trimmedId,
             name: workflowForm.name.trim() || existing.name,
             description: workflowForm.description.trim() || undefined,
-            endpoint: workflowForm.endpoint.trim() || undefined,
-            deployment: workflowForm.deployment.trim() || undefined,
-            apiKey: trimmedApiKey || undefined,
-            apiVersion: trimmedApiVersion || undefined,
             defaultParameters: defaultParametersRecord,
             streaming: workflowForm.streamingEnabled
               ? {

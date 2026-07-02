@@ -88,65 +88,11 @@ export function WorkflowDialog({
             />
           </div>
 
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold uppercase text-foreground/60">
-              Endpoint
-            </label>
-            <input
-              type="text"
-              value={workflowForm.endpoint}
-              onChange={onFieldChange("endpoint")}
-              className="rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder="https://..."
-              autoComplete="off"
-            />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold uppercase text-foreground/60">
-              Deployment
-            </label>
-            <input
-              type="text"
-              value={workflowForm.deployment}
-              onChange={onFieldChange("deployment")}
-              className="rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder="Model deployment (optional)"
-              autoComplete="off"
-            />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold uppercase text-foreground/60">
-              API Key
-            </label>
-            <input
-              type="text"
-              value={workflowForm.apiKey}
-              onChange={onFieldChange("apiKey")}
-              className="rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder="Optional API key"
-              autoComplete="off"
-            />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold uppercase text-foreground/60">
-              API Version
-            </label>
-            <input
-              type="text"
-              value={workflowForm.apiVersion}
-              onChange={onFieldChange("apiVersion")}
-              className="rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder="e.g. 2024-08-01-preview"
-              autoComplete="off"
-            />
-            <p className="text-xs text-foreground/60">
-              Azure OpenAI API version. Overrides the value in the backend
-              <code className="ml-1 rounded bg-muted px-1">.env</code>.
-            </p>
-          </div>
+          <p className="rounded-md border border-dashed border-border bg-card/40 p-3 text-xs text-foreground/70">
+            LLM profiles and API keys are now managed at the document
+            level. Open the <strong>LLM Profiles</strong> tab to define
+            profiles, then reference one from each step's settings.
+          </p>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">

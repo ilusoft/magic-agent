@@ -3,17 +3,12 @@
 The user added ``web-search-tavily-qwen-local`` to
 ``configs/agents/agents.json`` to exercise the OpenAI-compatible
 provider + MCP tool calling pipeline against a local Qwen LLM and the
-Tavily MCP server. This module verifies two things without ever
-hitting a real network endpoint:
-
-1. ``WorkflowExecutor._resolve_llm_config`` lifts the agent's
-   top-level ``provider``/``baseUrl``/``model`` into the chat-model
-   config so the ``LLMFactory`` would receive an
-   ``openai-compatible`` request.
-2. ``McpToolRegistry`` exposes the renamed tools (``web_search``,
-   ``fetch_page``) and the underlying ``_run`` closure invokes the
-   real MCP tool names (``tavily_search``, ``tavily_extract``) — not
-   the agent-level ``name`` from the JSON.
+Tavily MCP server. After the global profiles/tools refactor (phase
+8/9) the LLM config lives in the document-level ``llmProfiles`` map
+and the MCP tool config lives in the document-level ``tools`` map;
+this module verifies both lookups still produce an openai-compatible
+chat config and a renamed LangChain toolset without ever hitting a
+real network endpoint.
 
 The registry/network portion is exercised in isolation against a
 fake ``McpClient`` so we don't need the ``mcp`` Python SDK to be
@@ -24,6 +19,7 @@ run.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -39,10 +35,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _AGENTS_JSON = _REPO_ROOT / "configs" / "agents" / "agents.json"
 
 
-def _load_web_search_agent() -> dict[str, Any]:
+def _load_document() -> dict[str, Any]:
     assert _AGENTS_JSON.exists(), f"missing {_AGENTS_JSON}"
     with _AGENTS_JSON.open() as fh:
-        document = json.load(fh)
+        return json.load(fh)
+
+
+def _load_web_search_agent() -> dict[str, Any]:
+    document = _load_document()
     agent = next(
         (a for a in document["agents"] if a.get("id") == "web-search-tavily-qwen-local"),
         None,
@@ -51,60 +51,80 @@ def _load_web_search_agent() -> dict[str, Any]:
     return agent
 
 
-class TestWebSearchAgentConfiguration:
-    """Static checks on the JSON definition itself."""
+def _web_search_profile(document: dict[str, Any]) -> dict[str, Any]:
+    """The LLM profile referenced by the web-search agent's steps."""
+    profiles = document.get("llmProfiles", {})
+    agent = _load_web_search_agent()
+    # All steps in this agent reference the same profile. Pull the
+    # profileId from the first agent step and look it up.
+    for step in agent.get("steps", []):
+        profile_id = (step.get("llmConfig") or {}).get("profileId")
+        if profile_id:
+            profile = profiles.get(profile_id)
+            if profile is not None:
+                return profile
+    raise AssertionError(
+        "web-search-tavily-qwen-local has no agent step with a "
+        "profileId; expected the migration to wire it up."
+    )
 
-    def test_top_level_provider_is_openai_compatible(self) -> None:
-        agent = _load_web_search_agent()
-        assert agent["provider"] == "openai-compatible", (
-            "The agent must declare a top-level provider so "
-            "WorkflowExecutor._resolve_llm_config routes the chat "
-            "model through the OpenAI-compatible factory branch."
+
+def _tavily_tool_definition(document: dict[str, Any]) -> dict[str, Any]:
+    """The MCP tool definition in the document-level ``tools`` map."""
+    tools = document.get("tools", {})
+    tavily = tools.get("tavily-mcp")
+    assert tavily is not None, (
+        "tavily-mcp must live in the document-level tools map (post-refactor)"
+    )
+    return tavily
+
+
+class TestWebSearchAgentConfiguration:
+    """Static checks on the migrated JSON definition itself."""
+
+    def test_llm_profile_is_openai_compatible(self) -> None:
+        document = _load_document()
+        profile = _web_search_profile(document)
+        assert profile["provider"] == "openai-compatible", (
+            "The web-search agent's profile must declare provider "
+            "openai-compatible so WorkflowExecutor._resolve_step_llm_config "
+            "routes the chat model through the OpenAI-compatible factory branch."
         )
 
     def test_base_url_and_model_are_set(self) -> None:
-        agent = _load_web_search_agent()
-        assert agent["baseUrl"] == "http://127.0.0.1:8000/v1"
-        # Model name is whatever the local server advertises on
-        # ``GET /v1/models``. The 404 in the operator logs was
-        # caused by pinning ``qwen-3.5`` here when the server only
-        # exposes ``Qwen3.6-35B-A3B-OptiQ-4bit`` (and a couple of
-        # others); assert the new name is wired so the same
-        # regression can't sneak back in.
-        assert agent["model"] == "Qwen3.6-35B-A3B-OptiQ-4bit"
+        document = _load_document()
+        profile = _web_search_profile(document)
+        assert profile["baseUrl"] == "http://127.0.0.1:8000/v1"
+        assert profile["model"] == "Qwen3.6-35B-A3B-OptiQ-4bit"
 
-    def test_default_parameters_resolves_api_key_env_placeholder(self) -> None:
-        """``defaultParameters.apiKey`` should ideally be a
-        ``${ENV_VAR}`` placeholder so the secret stays out of the
-        JSON (which is committed to git). Hardcoded values still
-        work — the resolver forwards them through — so we accept
-        both shapes here but warn if the agent has committed a
-        literal secret. The same check applies to MCP tool
-        ``headers`` so we surface both at once.
+    def test_llm_profile_api_key_is_not_a_secret_literal(self) -> None:
+        """If the operator committed a hardcoded API key we surface
+        a warning so the same regression can't sneak back in. The
+        ``${ENV_VAR}`` and ``{ENV_VAR}`` placeholder forms are
+        preferred.
         """
-        agent = _load_web_search_agent()
-        api_key = agent["defaultParameters"].get("apiKey", "")
+        document = _load_document()
+        profile = _web_search_profile(document)
+        api_key = profile.get("apiKey", "")
 
-        is_placeholder = api_key.startswith("${") and api_key.endswith("}")
-        is_env_braces = api_key.startswith("{") and api_key.endswith("}")
+        is_placeholder = (
+            (api_key.startswith("${") and api_key.endswith("}"))
+            or (api_key.startswith("{") and api_key.endswith("}"))
+        )
 
-        if not (is_placeholder or is_env_braces):
+        if not is_placeholder:
             import warnings
 
             warnings.warn(
-                "defaultParameters.apiKey is a hardcoded value; "
+                "llmProfiles[...].apiKey is a hardcoded value; "
                 "use '${OPENAI_API_KEY}' to keep the secret out of "
                 "version control.",
                 stacklevel=2,
             )
-        # Resolver-level coverage of the placeholder path lives in
-        # ``TestResolveLLMConfigForWebSearchAgent``.
 
-    def test_has_tavily_mcp_tool_definition(self) -> None:
-        agent = _load_web_search_agent()
-        mcp_tools = [t for t in agent.get("tools", []) if t.get("type") == "mcp"]
-        assert mcp_tools, "Agent must declare at least one MCP tool"
-        tavily = mcp_tools[0]
+    def test_tavily_tool_definition_in_document_pool(self) -> None:
+        document = _load_document()
+        tavily = _tavily_tool_definition(document)
         assert "tavilyApiKey" in tavily["serverUrl"]
         assert tavily["allowedTools"] == ["tavily_search", "tavily_extract"]
         action_names = {a["name"] for a in tavily.get("actions", [])}
@@ -119,16 +139,24 @@ class TestWebSearchAgentConfiguration:
 
 
 class TestResolveLLMConfigForWebSearchAgent:
-    """The chat-model factory must receive an openai-compatible
-    config with the right ``base_url``/``model``."""
+    """``WorkflowExecutor._resolve_step_llm_config`` must look up the
+    document-level profile, merge any inline overrides, and return an
+    openai-compatible chat config with the right ``base_url`` /
+    ``model``.
+    """
 
     def setup_method(self) -> None:
         self.executor = WorkflowExecutor()
 
-    def test_resolve_llm_config_uses_openai_compatible(self) -> None:
+    def test_resolve_step_llm_config_uses_openai_compatible(self) -> None:
+        document = _load_document()
         agent = _load_web_search_agent()
-        llm_config = self.executor._resolve_llm_config(agent)
+        search_step = next(
+            s for s in agent["steps"] if s.get("name") == "web-search-agent"
+        )
+        llm_config = self.executor._resolve_step_llm_config(search_step, document)
 
+        assert llm_config is not None
         assert llm_config["provider"] == "openai-compatible"
         assert llm_config["model"] == "Qwen3.6-35B-A3B-OptiQ-4bit"
         assert llm_config["base_url"] == "http://127.0.0.1:8000/v1"
@@ -141,54 +169,57 @@ class TestResolveLLMConfigForWebSearchAgent:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """``defaultParameters.apiKey = "${OPENAI_API_KEY}"`` must
+        """``llmProfiles.<id>.apiKey = "${OPENAI_API_KEY}"`` must
         resolve to the real env-var value before the LLM factory
         sees it. Without this, the local Qwen server rejects the
         literal ``${OPENAI_API_KEY}`` string with a 401
         ``Invalid API key`` error.
 
-        We build a synthetic agent with the placeholder so the
-        test is independent of whatever shape the checked-in
-        ``agents.json`` happens to have.
+        We build a synthetic document with the placeholder so the
+        test is independent of whatever the checked-in
+        ``agents.json`` happens to have. ``_resolve_llm_config`` (not
+        ``_resolve_step_llm_config``) is the entry point that runs
+        the ``${ENV_VAR}`` substitution before returning.
         """
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test-from-env")
 
-        agent = {
-            "id": "synthetic",
-            "provider": "openai-compatible",
-            "baseUrl": "http://127.0.0.1:8000/v1",
-            "model": "Qwen3.6-35B-A3B-OptiQ-4bit",
-            "defaultParameters": {
-                "apiKey": "${OPENAI_API_KEY}",
-            },
+        document = {
+            "llmProfiles": {
+                "synthetic": {
+                    "provider": "openai-compatible",
+                    "baseUrl": "http://127.0.0.1:8000/v1",
+                    "model": "Qwen3.6-35B-A3B-OptiQ-4bit",
+                    "apiKey": "${OPENAI_API_KEY}",
+                }
+            }
         }
-        llm_config = self.executor._resolve_llm_config(agent)
+        step = {"name": "synthetic-chat", "llmConfig": {"profileId": "synthetic"}}
+
+        llm_config = self.executor._resolve_llm_config({}, step=step, document=document)
 
         assert llm_config["api_key"] == "sk-test-from-env"
         # Resolved value must NOT be the raw placeholder string.
         assert "${" not in (llm_config.get("api_key") or "")
 
     def test_unresolved_api_key_placeholder_does_not_leak(self) -> None:
-        """When the env var is unset and the agent only declares a
+        """When the env var is unset and the profile only declares a
         ``${VAR}`` placeholder, the resolver must clear the key so
         the LLM factory can fall back to its settings/env-var chain.
         Forwarding the raw ``${OPENAI_API_KEY}`` string would
         produce a 401 against any auth-enabled local server.
-
-        Again, built against a synthetic agent so the test is
-        independent of ``agents.json``.
         """
-        agent = {
-            "id": "synthetic",
-            "provider": "openai-compatible",
-            "baseUrl": "http://127.0.0.1:8000/v1",
-            "model": "Qwen3.6-35B-A3B-OptiQ-4bit",
-            "defaultParameters": {
-                "apiKey": "${UNSET_ENV_VAR_FOR_TEST}",
-            },
+        document = {
+            "llmProfiles": {
+                "synthetic": {
+                    "provider": "openai-compatible",
+                    "baseUrl": "http://127.0.0.1:8000/v1",
+                    "model": "Qwen3.6-35B-A3B-OptiQ-4bit",
+                    "apiKey": "${UNSET_ENV_VAR_FOR_TEST}",
+                }
+            }
         }
-        # Strip every env var the resolver might consult.
-        import os
+        step = {"name": "synthetic-chat", "llmConfig": {"profileId": "synthetic"}}
+
         keys = (
             "OPENAI_API_KEY",
             "LLM_API_KEY",
@@ -197,7 +228,7 @@ class TestResolveLLMConfigForWebSearchAgent:
         )
         original = {k: os.environ.pop(k, None) for k in keys}
         try:
-            llm_config = self.executor._resolve_llm_config(agent)
+            llm_config = self.executor._resolve_llm_config({}, step=step, document=document)
         finally:
             for k, v in original.items():
                 if v is not None:
@@ -208,27 +239,47 @@ class TestResolveLLMConfigForWebSearchAgent:
             f"{llm_config.get('api_key')!r}"
         )
 
-    def test_top_level_api_key_wins_over_default_parameters(self) -> None:
-        """Top-level ``apiKey`` should still take precedence over
-        ``defaultParameters.apiKey`` so callers can hardcode a key
-        when they really want to.
+    def test_profile_api_key_overrides_default_parameters(self) -> None:
+        """A document-level ``llmProfiles.<id>.apiKey`` overrides any
+        ``defaultParameters.apiKey`` so callers can put a hardcoded
+        key in the profile when they really want to.
         """
-        agent = _load_web_search_agent()
-        agent = {**agent, "apiKey": "hardcoded-top-level"}
-        llm_config = self.executor._resolve_llm_config(agent)
-        assert llm_config["api_key"] == "hardcoded-top-level"
+        document = {
+            "defaultParameters": {"apiKey": "from-default-params"},
+            "llmProfiles": {
+                "synthetic": {
+                    "provider": "openai-compatible",
+                    "baseUrl": "http://127.0.0.1:8000/v1",
+                    "model": "Qwen3.6-35B-A3B-OptiQ-4bit",
+                    "apiKey": "from-profile",
+                }
+            },
+        }
+        step = {"name": "synthetic-chat", "llmConfig": {"profileId": "synthetic"}}
+
+        llm_config = self.executor._resolve_llm_config({}, step=step, document=document)
+
+        assert llm_config["api_key"] == "from-profile"
 
     def test_default_parameters_plain_api_key_is_accepted(self) -> None:
-        """A plain (non-placeholder) string in ``defaultParameters.apiKey``
-        is also accepted so authors don't have to wrap every value
-        in ``${...}``.
+        """A plain (non-placeholder) string in the profile's
+        ``apiKey`` is also accepted so authors don't have to wrap
+        every value in ``${...}``.
         """
-        agent = _load_web_search_agent()
-        agent = {**agent, "defaultParameters": {**agent["defaultParameters"], "apiKey": "plain-value"}}
-        # Drop the placeholder so we exercise the plain path.
-        agent["defaultParameters"].pop("apiKey", None)
-        agent["defaultParameters"]["apiKey"] = "plain-value"
-        llm_config = self.executor._resolve_llm_config(agent)
+        document = {
+            "llmProfiles": {
+                "synthetic": {
+                    "provider": "openai-compatible",
+                    "baseUrl": "http://127.0.0.1:8000/v1",
+                    "model": "Qwen3.6-35B-A3B-OptiQ-4bit",
+                    "apiKey": "plain-value",
+                }
+            },
+        }
+        step = {"name": "synthetic-chat", "llmConfig": {"profileId": "synthetic"}}
+
+        llm_config = self.executor._resolve_llm_config({}, step=step, document=document)
+
         assert llm_config["api_key"] == "plain-value"
 
 
@@ -272,10 +323,8 @@ class TestMcpToolRenaming:
 
     @pytest.mark.asyncio
     async def test_renamed_tools_invoke_real_mcp_names(self) -> None:
-        agent = _load_web_search_agent()
-        tavily_def = next(
-            t for t in agent["tools"] if t.get("id") == "tavily-mcp"
-        )
+        document = _load_document()
+        tavily_def = _tavily_tool_definition(document)
 
         # Run the same tool-building loop ``McpToolRegistry`` uses,
         # but with a fake client so we don't need the real MCP SDK
@@ -320,8 +369,7 @@ class TestMcpToolRenaming:
         invoked = [name for name, _ in client.calls]
         assert invoked == ["tavily_search", "tavily_extract"], (
             "Renamed LangChain tools must invoke the underlying MCP tool "
-            "by its real server-side name, not the agent-level "
-            "``tools[].name`` or the renamed LangChain name."
+            "by its real server-side name, not the renamed LangChain name."
         )
         # The structured args must also survive the LangChain
         # ``ainvoke`` round-trip. Pre-fix, the legacy ``Tool``
@@ -345,10 +393,8 @@ class TestMcpToolRenaming:
         """
         from src.infrastructure.mcp import client as mcp_client_module
 
-        agent = _load_web_search_agent()
-        tavily_def = next(
-            t for t in agent["tools"] if t.get("id") == "tavily-mcp"
-        )
+        document = _load_document()
+        tavily_def = _tavily_tool_definition(document)
 
         fake = _FakeMcpClient()
 

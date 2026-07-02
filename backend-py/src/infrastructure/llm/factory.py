@@ -39,7 +39,33 @@ class LLMFactory:
     Supports OpenAI, Azure OpenAI, and OpenAI-compatible providers
     (e.g. local servers such as vLLM, llama.cpp, Ollama's OpenAI shim,
     LM Studio, etc.).
+
+    Model instances are cached based on their configuration to avoid
+    re-instantiation when the same model is used across multiple
+    workflow steps with identical settings.
     """
+
+    _model_cache: dict[str, "BaseChatModel"] = {}
+
+    def _make_cache_key(self, config: LLMConfig) -> str:
+        """Generate a cache key from LLM config for model reuse.
+
+        The cache key includes all configuration that affects the model
+        instance, including the resolved api_key to ensure different
+        credentials produce different cached models.
+        """
+        parts = [
+            config.provider,
+            config.model or "",
+            config.endpoint or "",
+            config.base_url or "",
+            config.deployment or "",
+            config.api_version or "",
+            str(config.temperature),
+            str(config.max_tokens or ""),
+            config.api_key or "",
+        ]
+        return "|".join(parts)
 
     def create_chat_model(
         self,
@@ -100,7 +126,13 @@ class LLMFactory:
             max_tokens=max_tokens,
         )
 
-        return self._create_model(config)
+        cache_key = self._make_cache_key(config)
+        if cache_key in self._model_cache:
+            return self._model_cache[cache_key]
+
+        model = self._create_model(config)
+        self._model_cache[cache_key] = model
+        return model
 
     def _create_model(self, config: LLMConfig) -> BaseChatModel:
         """Create model from config."""

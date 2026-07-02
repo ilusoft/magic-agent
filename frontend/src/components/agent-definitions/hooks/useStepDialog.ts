@@ -1,10 +1,12 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
 import type { AgentDefinitionsDocument } from "@/types/agents";
 import {
   type StepFormState,
   type KeyValueEntry,
+  type LlmConfigMode,
+  type StepLlmFormState,
   type WorkflowVariableDataType,
 } from "@/components/agent-definitions/types";
 import { useWorkflowAgentContext } from "@/components/agent-definitions/hooks/useWorkflowAgentContext";
@@ -54,6 +56,9 @@ interface UseStepDialogResult {
     onToolToggle: (
       toolId: string
     ) => (event: ChangeEvent<HTMLInputElement>) => void;
+    availableLlmProfiles: { id: string; provider: string; label?: string }[];
+    onLlmConfigModeChange: (mode: LlmConfigMode) => void;
+    onLlmConfigChange: (patch: Partial<StepLlmFormState>) => void;
     onDelete?: () => void;
   };
   title: string;
@@ -82,6 +87,8 @@ export function useStepDialog({
     handleParameterChange,
     handleParameterDataTypeChange,
     handleToolToggle,
+    handleLlmConfigModeChange,
+    handleLlmConfigChange,
   } = useStepForm();
   const [stepOriginalName, setStepOriginalName] = useState<string | null>(null);
   const { agent, availableTools, workflowParameters } = useWorkflowAgentContext(
@@ -178,6 +185,14 @@ export function useStepDialog({
     reset,
   ]);
 
+  const availableLlmProfiles = useMemo(() => {
+    const profiles = draftDocument?.llmProfiles ?? {};
+    return Object.entries(profiles).map(([id, profile]) => ({
+      id,
+      provider: profile.provider,
+    }));
+  }, [draftDocument?.llmProfiles]);
+
   return {
     dialogProps: {
       open,
@@ -198,6 +213,9 @@ export function useStepDialog({
       onParameterDataTypeChange: handleParameterDataTypeChange,
       availableTools,
       onToolToggle: handleToolToggle,
+      availableLlmProfiles,
+      onLlmConfigModeChange: handleLlmConfigModeChange,
+      onLlmConfigChange: handleLlmConfigChange,
       onDelete: mode === "edit" ? handleDelete : undefined,
     },
     title,

@@ -14,4 +14,6 @@ class AgentNotFoundError(Exception):
 class AgentValidationError(Exception):
     """Raised when agent definition validation fails."""
 
-    pass
+    def __init__(self, message: str, issues: list[str] | None = None) -> None:
+        self.issues = issues or [message]
+        super().__init__(message)

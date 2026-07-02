@@ -135,9 +135,9 @@ export function buildWorkflowGraph(agent: AgentDefinition): WorkflowGraph {
   const incomingByStep = new Map<string, number[]>();
   const stepColumns = new Map<string, number>();
   const layoutPositions: Record<string, AgentViewLayoutNode> =
-    agent.ViewLayout?.nodes ?? {};
+    agent.viewLayout?.nodes ?? {};
   const layoutEdges: Record<string, AgentViewLayoutEdge> =
-    agent.ViewLayout?.edges ?? {};
+    agent.viewLayout?.edges ?? {};
   const nodeIds = new Set<string>();
   const placeholderNodes = new Map<string, string>();
   const terminationNodes = new Map<string, string>();

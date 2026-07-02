@@ -32,6 +32,8 @@ public sealed record AgentStepExecutionResult(string Name, string Type, string O
     public List<AgentIterationTrace> Iterations { get; init; } = [];
 
     public bool ToolErrorDetected { get; init; }
+
+    public LLMCallConfig? LlmConfig { get; init; }
 }
 
 public sealed record AgentMessage(string Role, string Content, DateTimeOffset Timestamp);

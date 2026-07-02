@@ -29,42 +29,33 @@ public enum WorkflowVariableDataType
 
 public sealed class AgentDefinitionsDocument
 {
+    [JsonPropertyName("llmProfiles")]
+    public IDictionary<string, AgentLlmProfileDefinition> LlmProfiles { get; set; }
+        = new Dictionary<string, AgentLlmProfileDefinition>(StringComparer.OrdinalIgnoreCase);
+
+    [JsonPropertyName("tools")]
+    public IDictionary<string, AgentToolDefinition> Tools { get; set; }
+        = new Dictionary<string, AgentToolDefinition>(StringComparer.OrdinalIgnoreCase);
+
     [JsonPropertyName("agents")]
-    public IList<AgentDefinition> Agents { get; init; } = [];
+    public IList<AgentDefinition> Agents { get; set; } = [];
 }
 
 public sealed class AgentDefinition
 {
     [JsonPropertyName("id")]
     public required string Id { get; init; }
-
     [JsonPropertyName("name")]
-    public string Name { get; init; } = string.Empty;
-
+    public string Name { get; init; } = "";
     [JsonPropertyName("description")]
     public string? Description { get; init; }
-
-    [JsonPropertyName("endpoint")]
-    public string? Endpoint { get; init; }
-
-    [JsonPropertyName("deployment")]
-    public string? Deployment { get; init; }
-
-    [JsonPropertyName("apiKey")]
-    public string? ApiKey { get; init; }
-
     [JsonPropertyName("defaultParameters")]
-    public IDictionary<string, string> DefaultParameters { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
+    public IDictionary<string, string> DefaultParameters { get; init; }
+        = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     [JsonPropertyName("steps")]
     public IList<AgentStepDefinition> Steps { get; init; } = [];
-
-    [JsonPropertyName("tools")]
-    public IList<AgentToolDefinition> Tools { get; init; } = [];
-
-    [JsonPropertyName("ViewLayout")]
+    [JsonPropertyName("viewLayout")]
     public AgentViewLayout? ViewLayout { get; init; }
-
     [JsonPropertyName("streaming")]
     public AgentStreamingOptions? Streaming { get; init; }
 }
@@ -151,38 +142,30 @@ public sealed class AgentStepDefinition
 {
     [JsonPropertyName("name")]
     public required string Name { get; init; }
-
     [JsonPropertyName("type")]
     public required string Type { get; init; }
-
     [JsonPropertyName("parameters")]
-    public IDictionary<string, string> Parameters { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
+    public IDictionary<string, string> Parameters { get; init; }
+        = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     [JsonPropertyName("variableTypes")]
-    public IDictionary<string, WorkflowVariableDataType> VariableTypes { get; init; } = new Dictionary<string, WorkflowVariableDataType>(StringComparer.OrdinalIgnoreCase);
-
-    [JsonPropertyName("provider")]
-    public string Provider { get; init; } = "azure-openai";
-
-    [JsonPropertyName("options")]
-    public IDictionary<string, string> Options { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
+    public IDictionary<string, WorkflowVariableDataType> VariableTypes { get; init; }
+        = new Dictionary<string, WorkflowVariableDataType>(StringComparer.OrdinalIgnoreCase);
     [JsonPropertyName("conversation")]
     public AgentStepConversationOptions? Conversation { get; init; }
-
     [JsonPropertyName("tools")]
     public IList<string> Tools { get; init; } = [];
-
     [JsonPropertyName("stopOnToolError")]
     public bool StopOnToolError { get; init; }
-
     [JsonPropertyName("inputSource")]
     public string InputSource { get; init; } = "usePrevious";
+
+    [JsonPropertyName("llmConfig")]
+    public AgentStepLlmConfig? LlmConfig { get; init; }
 
     [JsonPropertyName("outcomes")]
     public IList<AgentStepOutcomeDefinition> Outcomes { get; init; } = [];
 
-    [JsonPropertyName("isStartStep")]
+    [JsonIgnore]
     public bool IsStartStep { get; set; }
 }
 
@@ -269,3 +252,104 @@ public sealed class AgentToolActionDefinition
     [JsonPropertyName("parameters")]
     public IDictionary<string, string> Parameters { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 }
+
+public sealed class AgentLlmProfileDefinition
+{
+    [JsonPropertyName("provider")]
+    public string Provider { get; init; } = "azure-openai";
+
+    [JsonPropertyName("endpoint")]
+    public string? Endpoint { get; init; }
+
+    [JsonPropertyName("deployment")]
+    public string? Deployment { get; init; }
+
+    [JsonPropertyName("apiVersion")]
+    public string? ApiVersion { get; init; }
+
+    [JsonPropertyName("baseUrl")]
+    public string? BaseUrl { get; init; }
+
+    [JsonPropertyName("model")]
+    public string? Model { get; init; }
+
+    [JsonPropertyName("apiKey")]
+    public string? ApiKey { get; init; }
+
+    [JsonPropertyName("headers")]
+    public IDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    [JsonPropertyName("temperature")]
+    public double? Temperature { get; init; }
+
+    [JsonPropertyName("maxTokens")]
+    public int? MaxTokens { get; init; }
+}
+
+public sealed class AgentStepLlmConfig
+{
+    [JsonPropertyName("profileId")]
+    public string? ProfileId { get; init; }
+
+    [JsonPropertyName("provider")]
+    public string? Provider { get; init; }
+
+    [JsonPropertyName("endpoint")]
+    public string? Endpoint { get; init; }
+
+    [JsonPropertyName("deployment")]
+    public string? Deployment { get; init; }
+
+    [JsonPropertyName("apiVersion")]
+    public string? ApiVersion { get; init; }
+
+    [JsonPropertyName("baseUrl")]
+    public string? BaseUrl { get; init; }
+
+    [JsonPropertyName("model")]
+    public string? Model { get; init; }
+
+    [JsonPropertyName("apiKey")]
+    public string? ApiKey { get; init; }
+
+    [JsonPropertyName("headers")]
+    public IDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    [JsonPropertyName("temperature")]
+    public double? Temperature { get; init; }
+
+    [JsonPropertyName("maxTokens")]
+    public int? MaxTokens { get; init; }
+}
+
+public sealed record LLMCallConfig(
+    string Provider,
+    string? Model,
+    string? Endpoint,
+    string? BaseUrl,
+    string? Deployment,
+    string? ApiVersion,
+    double? Temperature,
+    int? MaxTokens,
+    string? ApiKeyFingerprint)
+{
+    /// <summary>
+    /// Returns a short, non-reversible identifier for an API key (e.g. "***2S").
+    /// Mirrors <c>backend-py/src/application/agents/run_result.py:_fingerprint_api_key</c>.
+    /// </summary>
+    public static string? FingerprintApiKey(string? apiKey)
+    {
+        if (string.IsNullOrEmpty(apiKey))
+        {
+            return null;
+        }
+
+        if (apiKey.Length <= 4)
+        {
+            return $"***{apiKey}";
+        }
+
+        return $"***{apiKey[^4..]}";
+    }
+}
+

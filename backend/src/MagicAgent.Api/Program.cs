@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using MagicAgent.Api.Application.AgentRunner;
 using MagicAgent.Api.Application.Expressions;
+using MagicAgent.Api.Controllers;
 using MagicAgent.Api.Infrastructure.AgentRunner;
 using Serilog;
 using Serilog.Events;
@@ -23,7 +24,10 @@ try
     builder.Logging.AddSerilog(Log.Logger, dispose: true);
 
     builder.Services
-        .AddControllers()
+        .AddControllers(options =>
+        {
+            options.Filters.Add<AgentDefinitionsExceptionFilter>();
+        })
         .AddJsonOptions(options =>
         {
             if (!options.JsonSerializerOptions.Converters.Any(converter => converter is JsonStringEnumConverter))
@@ -69,6 +73,11 @@ try
     builder.Services.AddSingleton<IAgentDiagnosticsStore, InMemoryAgentDiagnosticsStore>();
     builder.Services.AddSingleton<IAgentRunProgressSink, NoOpAgentRunProgressSink>();
     builder.Services.AddSingleton<IAgentRunner, DefaultAgentRunner>();
+
+    builder.Services.AddSingleton<IChatClientFactory, AzureOpenAiChatClientFactory>();
+    builder.Services.AddSingleton<IChatClientFactory, OpenAiCompatibleChatClientFactory>();
+    builder.Services.AddSingleton<StepChatClientResolver>();
+
     builder.Services.AddWorkflowExpressionServices();
 
     var app = builder.Build();

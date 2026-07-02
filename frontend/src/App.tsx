@@ -4,8 +4,10 @@ import type { AgentDefinitionsDocument } from "@/types/agents";
 import { AgentDefinitionsView } from "@/views/AgentDefinitionsView";
 import { AgentRunnerView } from "@/views/AgentRunnerView";
 import type { AgentRunnerState } from "@/views/AgentRunnerView";
+import { LlmProfilesView } from "@/views/LlmProfilesView";
+import { ToolsView } from "@/views/ToolsView";
 
-type ActiveView = "editor" | "runner";
+type ActiveView = "llmProfiles" | "tools" | "workflows" | "runner";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5134";
@@ -52,7 +54,7 @@ function loadRunnerState(): AgentRunnerState {
 }
 
 function App() {
-  const [activeView, setActiveView] = useState<ActiveView>("editor");
+  const [activeView, setActiveView] = useState<ActiveView>("workflows");
   const [definitions, setDefinitions] =
     useState<AgentDefinitionsDocument | null>(null);
   const [loadingDefs, setLoadingDefs] = useState(false);
@@ -81,7 +83,7 @@ function App() {
     setDefinitionsError(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/agents/definitions`);
+      const response = await fetch(`${API_BASE_URL}/api/agent-definitions`);
 
       if (!response.ok) {
         throw new Error(
@@ -118,7 +120,7 @@ function App() {
   }, [loadDefinitions]);
 
   const content = useMemo(() => {
-    if (loadingDefs) {
+    if (loadingDefs && (activeView === "workflows" || activeView === "runner")) {
       return (
         <div className="rounded-md border border-dashed border-border bg-card/40 p-8 text-center text-sm text-foreground/70">
           Loading agent definitions…
@@ -126,29 +128,35 @@ function App() {
       );
     }
 
-    if (activeView === "editor") {
-      return (
-        <AgentDefinitionsView
-          definitions={definitions}
-          loading={loadingDefs}
-          error={definitionsError}
-          onReload={handleReloadDefinitions}
-          onDefinitionsUpdated={handleDefinitionsUpdated}
-          apiBaseUrl={API_BASE_URL}
-        />
-      );
+    switch (activeView) {
+      case "llmProfiles":
+        return <LlmProfilesView apiBaseUrl={API_BASE_URL} />;
+      case "tools":
+        return <ToolsView apiBaseUrl={API_BASE_URL} />;
+      case "runner":
+        return (
+          <AgentRunnerView
+            definitions={definitions}
+            loading={loadingDefs}
+            error={definitionsError}
+            apiBaseUrl={API_BASE_URL}
+            runnerState={runnerState}
+            setRunnerState={setRunnerState}
+          />
+        );
+      case "workflows":
+      default:
+        return (
+          <AgentDefinitionsView
+            definitions={definitions}
+            loading={loadingDefs}
+            error={definitionsError}
+            onReload={handleReloadDefinitions}
+            onDefinitionsUpdated={handleDefinitionsUpdated}
+            apiBaseUrl={API_BASE_URL}
+          />
+        );
     }
-
-    return (
-      <AgentRunnerView
-        definitions={definitions}
-        loading={loadingDefs}
-        error={definitionsError}
-        apiBaseUrl={API_BASE_URL}
-        runnerState={runnerState}
-        setRunnerState={setRunnerState}
-      />
-    );
   }, [
     activeView,
     definitions,
@@ -169,10 +177,24 @@ function App() {
           </div>
           <nav className="flex flex-wrap items-center gap-2">
             <HeaderButton
-              active={activeView === "editor"}
-              onClick={() => setActiveView("editor")}
+              active={activeView === "llmProfiles"}
+              onClick={() => setActiveView("llmProfiles")}
             >
-              Agent Definitions
+              LLM Profiles
+            </HeaderButton>
+
+            <HeaderButton
+              active={activeView === "tools"}
+              onClick={() => setActiveView("tools")}
+            >
+              Tools
+            </HeaderButton>
+
+            <HeaderButton
+              active={activeView === "workflows"}
+              onClick={() => setActiveView("workflows")}
+            >
+              Workflows
             </HeaderButton>
 
             <HeaderButton

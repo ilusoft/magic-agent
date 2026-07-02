@@ -11,6 +11,7 @@ import { DialogShell } from "@/components/agent-definitions/DialogShell";
 import { useExpandedValueEditor } from "@/components/agent-definitions/step-dialogs/useExpandedValueEditor";
 import {
   type KeyValueEntry,
+  type LlmConfigMode,
   type StepFormState,
   type WorkflowVariableDataType,
 } from "@/components/agent-definitions/types";
@@ -44,6 +45,9 @@ export interface StepDialogBaseProps {
   onToolToggle: (
     toolId: string
   ) => (event: ChangeEvent<HTMLInputElement>) => void;
+  availableLlmProfiles?: { id: string; provider: string; label?: string }[];
+  onLlmConfigModeChange?: (mode: LlmConfigMode) => void;
+  onLlmConfigChange?: (patch: Partial<StepFormState["llmConfig"]>) => void;
   onDelete?: () => void;
 }
 
@@ -51,6 +55,7 @@ export interface StandardStepDialogProps extends StepDialogBaseProps {
   showConversationToggle?: boolean;
   showTools?: boolean;
   showParameters?: boolean;
+  showLlmConfig?: boolean;
 }
 
 export interface ParameterListProps {
@@ -280,6 +285,7 @@ export function StandardStepDialog({
   showConversationToggle = true,
   showTools = true,
   showParameters = true,
+  showLlmConfig = true,
   ...props
 }: StandardStepDialogProps) {
   const expandedEditor = useExpandedValueEditor(props.onParameterChange);
@@ -316,6 +322,14 @@ export function StandardStepDialog({
             apiBaseUrl={props.apiBaseUrl}
           />
         ) : null}
+        {showLlmConfig ? (
+          <LlmConfigSection
+            llmConfig={props.stepForm.llmConfig}
+            availableLlmProfiles={props.availableLlmProfiles ?? []}
+            onModeChange={props.onLlmConfigModeChange ?? (() => {})}
+            onChange={props.onLlmConfigChange ?? (() => {})}
+          />
+        ) : null}
         {showTools && props.availableTools.length > 0 ? (
           <div className="space-y-2">
             <span className="text-xs font-semibold uppercase text-foreground/60">
@@ -342,5 +356,198 @@ export function StandardStepDialog({
       </StepDialogContainer>
       {expandedEditor.dialog}
     </>
+  );
+}
+
+function LlmConfigSection({
+  llmConfig,
+  availableLlmProfiles,
+  onModeChange,
+  onChange,
+}: {
+  llmConfig: StepFormState["llmConfig"];
+  availableLlmProfiles: { id: string; provider: string }[];
+  onModeChange: (mode: LlmConfigMode) => void;
+  onChange: (patch: Partial<StepFormState["llmConfig"]>) => void;
+}) {
+  return (
+    <div className="space-y-2 rounded-md border border-border bg-card/40 p-3">
+      <span className="text-xs font-semibold uppercase text-foreground/60">
+        LLM Configuration
+      </span>
+
+      <div className="flex flex-wrap gap-3 text-sm">
+        <label className="flex items-center gap-1.5">
+          <input
+            type="radio"
+            name="llmConfigMode"
+            checked={llmConfig.mode === "profile"}
+            onChange={() => onModeChange("profile")}
+            className="h-3.5 w-3.5"
+          />
+          Use profile
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input
+            type="radio"
+            name="llmConfigMode"
+            checked={llmConfig.mode === "inline"}
+            onChange={() => onModeChange("inline")}
+            className="h-3.5 w-3.5"
+          />
+          Inline override
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input
+            type="radio"
+            name="llmConfigMode"
+            checked={llmConfig.mode === "inherit"}
+            onChange={() => onModeChange("inherit")}
+            className="h-3.5 w-3.5"
+          />
+          Inherit (env vars)
+        </label>
+      </div>
+
+      {llmConfig.mode === "profile" ? (
+        <div className="space-y-1">
+          <label className="text-xs font-semibold uppercase text-foreground/60">
+            Profile
+          </label>
+          {availableLlmProfiles.length === 0 ? (
+            <p className="text-sm text-foreground/60">
+              No LLM profiles defined. Open the LLM Profiles view to create one.
+            </p>
+          ) : (
+            <select
+              value={llmConfig.profileId}
+              onChange={(e) => onChange({ profileId: e.target.value })}
+              className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="">Select a profile…</option>
+              {availableLlmProfiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.id} ({p.provider})
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      ) : null}
+
+      {llmConfig.mode === "inline" ? (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <Field label="Provider">
+            <select
+              value={llmConfig.provider}
+              onChange={(e) => onChange({ provider: e.target.value })}
+              className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="azure-openai">azure-openai</option>
+              <option value="openai-compatible">openai-compatible</option>
+            </select>
+          </Field>
+          {llmConfig.provider === "azure-openai" ? (
+            <>
+              <Field label="Endpoint">
+                <input
+                  type="text"
+                  value={llmConfig.endpoint}
+                  onChange={(e) => onChange({ endpoint: e.target.value })}
+                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </Field>
+              <Field label="Deployment">
+                <input
+                  type="text"
+                  value={llmConfig.deployment}
+                  onChange={(e) => onChange({ deployment: e.target.value })}
+                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </Field>
+              <Field label="API version">
+                <input
+                  type="text"
+                  value={llmConfig.apiVersion}
+                  onChange={(e) => onChange({ apiVersion: e.target.value })}
+                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </Field>
+            </>
+          ) : (
+            <>
+              <Field label="Base URL">
+                <input
+                  type="text"
+                  value={llmConfig.baseUrl}
+                  onChange={(e) => onChange({ baseUrl: e.target.value })}
+                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </Field>
+              <Field label="Model">
+                <input
+                  type="text"
+                  value={llmConfig.model}
+                  onChange={(e) => onChange({ model: e.target.value })}
+                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </Field>
+            </>
+          )}
+          <Field label="API key" fullWidth>
+            <input
+              type="text"
+              value={llmConfig.apiKey}
+              onChange={(e) => onChange({ apiKey: e.target.value })}
+              placeholder="literal value or ${ENV_VAR}"
+              className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </Field>
+          <Field label="Temperature">
+            <input
+              type="number"
+              step="0.1"
+              value={llmConfig.temperature}
+              onChange={(e) => onChange({ temperature: e.target.value })}
+              className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </Field>
+          <Field label="Max tokens">
+            <input
+              type="number"
+              value={llmConfig.maxTokens}
+              onChange={(e) => onChange({ maxTokens: e.target.value })}
+              className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </Field>
+        </div>
+      ) : null}
+
+      {llmConfig.mode === "inherit" ? (
+        <p className="text-sm text-foreground/60">
+          The runner will fall back to the <code>AZURE_OPENAI_*</code>{" "}
+          environment variables at execution time.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+  fullWidth,
+}: {
+  label: string;
+  children: ReactNode;
+  fullWidth?: boolean;
+}) {
+  return (
+    <div className={fullWidth ? "sm:col-span-2" : ""}>
+      <label className="block text-xs font-semibold uppercase text-foreground/60">
+        {label}
+      </label>
+      <div className="mt-1">{children}</div>
+    </div>
   );
 }

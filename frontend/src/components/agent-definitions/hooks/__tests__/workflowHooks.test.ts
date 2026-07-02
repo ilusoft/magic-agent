@@ -3,7 +3,7 @@ import type { ChangeEvent } from "react";
 import { describe, it, expect, vi } from "vitest";
 
 import type { AgentDefinitionsDocument } from "@/types/agents";
-import type { StepFormState, WorkflowNode } from "@/components/agent-definitions/types";
+import { EMPTY_STEP_LLM_FORM, type StepFormState, type WorkflowNode } from "@/components/agent-definitions/types";
 import { useWorkflowAgentContext } from "@/components/agent-definitions/hooks/useWorkflowAgentContext";
 import { useStepDialogState } from "@/components/agent-definitions/hooks/useStepDialogState";
 import { useStepForm } from "@/components/agent-definitions/hooks/useStepForm";
@@ -30,7 +30,7 @@ const createDocument = (): AgentDefinitionsDocument => ({
         { id: "tool-1", type: "rest", name: "Tool One" },
         { id: "tool-2", type: "rest" },
       ],
-      ViewLayout: {},
+      viewLayout: {},
     },
   ],
 });
@@ -120,6 +120,7 @@ describe("useStepForm", () => {
     conversationEnabled: true,
     parameters: [],
     tools: [],
+    llmConfig: { ...EMPTY_STEP_LLM_FORM },
   });
 
   it("updates step type and parameters when type changes", () => {
@@ -319,6 +320,7 @@ describe("useStepPersistence", () => {
     conversationEnabled: true,
     parameters: [],
     tools: [],
+    llmConfig: { ...EMPTY_STEP_LLM_FORM },
     ...overrides,
   });
 
@@ -422,6 +424,7 @@ describe("useStepPersistence", () => {
         conversationEnabled: true,
         parameters: [],
         tools: [],
+        llmConfig: { ...EMPTY_STEP_LLM_FORM },
       },
       stepOriginalName: "Existing Step",
     });

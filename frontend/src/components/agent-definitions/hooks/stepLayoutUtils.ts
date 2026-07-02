@@ -20,13 +20,13 @@ export function renameStepReferences(
   const oldNodeId = `${agent.id}-${originalName}`;
   const newNodeId = `${agent.id}-${nextName}`;
 
-  if (agent.ViewLayout?.nodes) {
-    moveLayoutEntry(agent.ViewLayout.nodes, oldNodeId, newNodeId);
-    moveLayoutEntry(agent.ViewLayout.nodes, originalName, nextName);
+  if (agent.viewLayout?.nodes) {
+    moveLayoutEntry(agent.viewLayout.nodes, oldNodeId, newNodeId);
+    moveLayoutEntry(agent.viewLayout.nodes, originalName, nextName);
   }
 
-  if (agent.ViewLayout?.edges) {
-    renameLayoutEdgeKeys(agent.ViewLayout.edges, oldNodeId, newNodeId);
+  if (agent.viewLayout?.edges) {
+    renameLayoutEdgeKeys(agent.viewLayout.edges, oldNodeId, newNodeId);
   }
 }
 

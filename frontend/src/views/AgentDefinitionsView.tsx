@@ -162,7 +162,7 @@ export function AgentDefinitionsView({
     graph,
     activeWorkflowId,
     applyDocumentUpdate,
-    viewport: activeAgent?.ViewLayout?.viewport ?? null,
+    viewport: activeAgent?.viewLayout?.viewport ?? null,
   });
 
   useEffect(() => {

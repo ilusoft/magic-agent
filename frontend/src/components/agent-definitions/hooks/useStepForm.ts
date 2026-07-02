@@ -4,7 +4,9 @@ import type { ChangeEvent } from "react";
 import {
   STEP_TYPE_OPTIONS,
   type KeyValueEntry,
+  type LlmConfigMode,
   type StepFormState,
+  type StepLlmFormState,
   type StepType,
   type WorkflowVariableDataType,
 } from "@/components/agent-definitions/types";
@@ -86,6 +88,8 @@ interface UseStepFormResult {
   handleToolToggle: (
     toolId: string
   ) => (event: ChangeEvent<HTMLInputElement>) => void;
+  handleLlmConfigModeChange: (mode: LlmConfigMode) => void;
+  handleLlmConfigChange: (patch: Partial<StepLlmFormState>) => void;
 }
 
 export function useStepForm(): UseStepFormResult {
@@ -280,6 +284,30 @@ export function useStepForm(): UseStepFormResult {
     []
   );
 
+  const handleLlmConfigModeChange = useCallback((mode: LlmConfigMode) => {
+    setStepForm((previous) => {
+      if (!previous) {
+        return previous;
+      }
+      return {
+        ...previous,
+        llmConfig: { ...previous.llmConfig, mode },
+      };
+    });
+  }, []);
+
+  const handleLlmConfigChange = useCallback((patch: Partial<StepLlmFormState>) => {
+    setStepForm((previous) => {
+      if (!previous) {
+        return previous;
+      }
+      return {
+        ...previous,
+        llmConfig: { ...previous.llmConfig, ...patch },
+      };
+    });
+  }, []);
+
   return {
     stepForm,
     stepFormError,
@@ -294,5 +322,7 @@ export function useStepForm(): UseStepFormResult {
     handleParameterChange,
     handleParameterDataTypeChange,
     handleToolToggle,
+    handleLlmConfigModeChange,
+    handleLlmConfigChange,
   };
 }

@@ -21,7 +21,8 @@ public sealed class DefaultAgentRunner(
   IAgentDiagnosticsStore diagnosticsStore,
   IAgentRunProgressSink progressSink,
   ILogger<DefaultAgentRunner> logger,
-  IWorkflowExpressionEvaluator expressionEvaluator) : IAgentRunner
+  IWorkflowExpressionEvaluator expressionEvaluator,
+  StepChatClientResolver chatClientResolver) : IAgentRunner
 {
     private readonly IAgentDefinitionsProvider _definitionsProvider =
       definitionsProvider ?? throw new ArgumentNullException(nameof(definitionsProvider));
@@ -37,6 +38,8 @@ public sealed class DefaultAgentRunner(
       logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IWorkflowExpressionEvaluator _expressionEvaluator =
       expressionEvaluator ?? throw new ArgumentNullException(nameof(expressionEvaluator));
+    private readonly StepChatClientResolver _chatClientResolver =
+      chatClientResolver ?? throw new ArgumentNullException(nameof(chatClientResolver));
     private const int MaxWorkflowSteps = 100;
     private static readonly JsonSerializerOptions PassThroughSerializerOptions = new(JsonSerializerDefaults.Web);
 
@@ -51,26 +54,13 @@ public sealed class DefaultAgentRunner(
 
         var progressSink = request.ProgressSink ?? _progressSink;
 
-        var definition = await _definitionsProvider.GetAgentDefinitionAsync(request.AgentId, cancellationToken);
+        var document = await _definitionsProvider.GetDefinitionsAsync(cancellationToken);
+        var definition = document.Agents.FirstOrDefault(a => string.Equals(a.Id, request.AgentId, StringComparison.OrdinalIgnoreCase))
+            ?? throw new AgentNotFoundException(request.AgentId);
 
-        definition = _definitionValueResolver.Resolve(definition ?? throw new AgentNotFoundException(request.AgentId));
+        definition = _definitionValueResolver.Resolve(definition);
 
         var parameters = new Dictionary<string, string>(definition.DefaultParameters, StringComparer.OrdinalIgnoreCase);
-
-        if (!string.IsNullOrWhiteSpace(definition.Endpoint))
-        {
-            parameters.TryAdd("endpoint", definition.Endpoint);
-        }
-
-        if (!string.IsNullOrWhiteSpace(definition.Deployment))
-        {
-            parameters.TryAdd("deployment", definition.Deployment);
-        }
-
-        if (!string.IsNullOrWhiteSpace(definition.ApiKey))
-        {
-            parameters.TryAdd("apiKey", definition.ApiKey);
-        }
 
         if (!string.IsNullOrWhiteSpace(request.Input))
         {
@@ -86,7 +76,7 @@ public sealed class DefaultAgentRunner(
         var workflowVariableStates = new Dictionary<string, WorkflowVariableState>(StringComparer.OrdinalIgnoreCase);
 
         var toolBuilder = new AgentToolBuilder(_logger);
-        await using var toolContext = await toolBuilder.BuildAsync(definition, request.Headers, cancellationToken).ConfigureAwait(false);
+        await using var toolContext = await toolBuilder.BuildAsync(document, definition, request.Headers, cancellationToken).ConfigureAwait(false);
 
         if (toolContext.InitializationErrors.Count > 0)
         {
@@ -203,19 +193,21 @@ public sealed class DefaultAgentRunner(
                 lastStepOutput);
             var resolvedParameters = parameterResolution.Values;
 
-            // resolvedOptions are forwarded to every step—even if the current implementation does not
-            // consume them—so future step types (e.g. tool invocations, scripted actions, advanced
-            // chat settings) can rely on workflow-defined execution options without needing new
-            // plumbing. Keeping the resolved dictionary in place also mirrors the Agent Framework
-            // contract which separates parameters (content) from options (execution knobs).
+            // resolvedOptions is forwarded to every step as an empty
+            // dictionary so the call site below stays stable even
+            // though the legacy ``step.Options`` field was removed in
+            // the global profiles/tools refactor. Future step types
+            // that need their own options bag can add it to
+            // ``AgentStepDefinition`` and surface it here.
             var resolvedOptions = WorkflowPlaceholderResolver.ResolveDictionary(
-                stepDefinition.Options,
+                null,
                 workflowVariables,
                 parameters,
                 stepInput,
                 lastStepOutput);
 
             var (executionResult, updatedConversationId, updatedThreadState, stepThreadContext) = await ExecuteStepAsync(
+              document,
               definition,
               stepDefinition,
               stepInput,
@@ -285,6 +277,7 @@ public sealed class DefaultAgentRunner(
     }
 
     private async Task<(AgentStepExecutionResult Result, string? ConversationId, JsonElement? ThreadState, JsonElement? StepThreadContext)> ExecuteStepAsync(
+      AgentDefinitionsDocument document,
       AgentDefinition definition,
       AgentStepDefinition step,
       string? input,
@@ -303,6 +296,7 @@ public sealed class DefaultAgentRunner(
         if (step.Type.Equals("agent", StringComparison.OrdinalIgnoreCase))
         {
             return await ExecuteAgentStepAsync(
+              document,
               definition,
               step,
               input,
@@ -617,6 +611,7 @@ public sealed class DefaultAgentRunner(
     }
 
     private async Task<(AgentStepExecutionResult Result, string? ConversationId, JsonElement? ThreadState, JsonElement? StepThreadContext)> ExecuteAgentStepAsync(
+      AgentDefinitionsDocument document,
       AgentDefinition definition,
       AgentStepDefinition step,
       string? input,
@@ -653,6 +648,14 @@ public sealed class DefaultAgentRunner(
             throw new InvalidOperationException("Agent step requires an input message.");
         }
 
+        var (chatClient, llmCallConfig) = _chatClientResolver.Resolve(document, definition, step);
+        var chatOptions = BuildChatOptions(llmCallConfig);
+
+        if (tools is not null && tools.Count > 0)
+        {
+            chatOptions.Tools = tools.ToList();
+        }
+
         var conversationContext = await ConversationContext.CreateAsync(
           _conversationStore,
           step,
@@ -666,7 +669,7 @@ public sealed class DefaultAgentRunner(
 
         try
         {
-            var agent = AgentStepFactory.CreateAgent(definition, step, parameters, tools);
+            var agent = CreateAgentFromChatClient(chatClient, definition, chatOptions, instructions);
             AgentThread agentThread;
 
             if (threadState.HasValue)
@@ -707,6 +710,7 @@ public sealed class DefaultAgentRunner(
                     var errorResult = ToolInvocationUtilities.CreateErrorResult(step, toolAnalysis) with
                     {
                         Iterations = iterationTraces,
+                        LlmConfig = llmCallConfig,
                     };
                     return (errorResult, activeConversationId, serializedThread, threadState);
                 }
@@ -729,6 +733,7 @@ public sealed class DefaultAgentRunner(
                 ToolErrorDetected = toolAnalysis.HasErrors,
                 ResolvedParameters = MaterializeResolvedValues(resolvedParameters),
                 ParameterDebug = parameterDebug,
+                LlmConfig = llmCallConfig,
             };
 
             serializedThread ??= agentThread.Serialize();
@@ -753,11 +758,43 @@ public sealed class DefaultAgentRunner(
                 {
                     ResolvedParameters = MaterializeResolvedValues(resolvedParameters),
                     ParameterDebug = parameterDebug,
+                    LlmConfig = llmCallConfig,
                 },
                 conversationContext.ConversationId ?? conversationId,
                 threadState,
                 threadState);
         }
+    }
+
+    private static AIAgent CreateAgentFromChatClient(
+        IChatClient chatClient,
+        AgentDefinition definition,
+        ChatOptions chatOptions,
+        string instructions)
+    {
+        var agentOptions = new ChatClientAgentOptions
+        {
+            Instructions = instructions,
+            Name = definition.Name,
+            Description = definition.Description,
+            ChatOptions = chatOptions,
+        };
+
+        return chatClient.CreateAIAgent(agentOptions);
+    }
+
+    private static ChatOptions BuildChatOptions(LLMCallConfig llmCallConfig)
+    {
+        var options = new ChatOptions();
+        if (llmCallConfig.Temperature.HasValue)
+        {
+            options.Temperature = (float)llmCallConfig.Temperature.Value;
+        }
+        if (llmCallConfig.MaxTokens.HasValue)
+        {
+            options.MaxOutputTokens = llmCallConfig.MaxTokens;
+        }
+        return options;
     }
     private static List<ChatMessage> BuildChatMessages(string? instructions, string userMessage, IEnumerable<AgentMessage>? previousMessages)
     {

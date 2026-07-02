@@ -299,6 +299,7 @@ class WorkflowExecutor:
         parameters: dict[str, Any] | None = None,
         progress_sink: Any | None = None,
         conversation_id: str | None = None,
+        document: dict[str, Any] | None = None,
     ) -> AgentRunResult:
         """Execute a workflow while pushing progress events to a sink.
 
@@ -452,7 +453,7 @@ class WorkflowExecutor:
                 # when the actual LLM call raises. Stays ``None`` for
                 # non-agent steps (``setVariables``/``echo``).
                 step_llm_config: LLMCallConfig | None = (
-                    self._build_llm_call_config(agent_definition)
+                    self._build_llm_call_config(agent_definition, step=step, document=document)
                     if step_type == "agent"
                     else None
                 )
@@ -481,6 +482,7 @@ class WorkflowExecutor:
                             conversation_id=conversation_id,
                             progress_sink=progress_sink,
                             agent_id=agent_id,
+                            document=document,
                         )
                     )
                     if new_conversation_id:
@@ -1006,14 +1008,135 @@ class WorkflowExecutor:
             step_outputs=step_outputs,
         )
 
-    def _resolve_llm_config(self, agent_definition: dict[str, Any]) -> dict[str, Any]:
+    def _resolve_step_llm_config(
+        self,
+        step: dict[str, Any],
+        document: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Resolve the per-step LLM config from the document.
+
+        Mirrors the .NET ``StepChatClientResolver``:
+
+        1. If ``step.llmConfig.profileId`` is set, look up
+           ``document.llmProfiles[profileId]``. Missing -> log a
+           warning and fall through to the legacy resolution so a
+           misconfigured profile doesn't crash the run.
+        2. Merge any inline fields on ``step.llmConfig`` over the
+           profile (non-null inline fields win).
+        3. If neither a profile nor inline is set, return ``None``
+           and let the caller fall back to the legacy agent-level
+           resolution.
+
+        Returns ``None`` when neither a profile nor inline LLM
+        configuration is present on the step. The caller is
+        responsible for falling back to the legacy
+        ``_resolve_llm_config(agent_definition)`` path in that case.
+        """
+        if document is None:
+            return None
+
+        inline = step.get("llmConfig") or step.get("llm_config") or {}
+        if not inline:
+            return None
+
+        profile_id = inline.get("profileId") or inline.get("profile_id")
+        profiles = document.get("llmProfiles") or document.get("llm_profiles") or {}
+        base: dict[str, Any] = {}
+
+        if profile_id:
+            profile = profiles.get(profile_id)
+            if profile is None:
+                logger.warning(
+                    "llm_profile_not_found",
+                    profile_id=profile_id,
+                    step_name=step.get("name", "<unnamed>"),
+                )
+            else:
+                base = dict(profile)
+
+        if not base and not any(
+            inline.get(k)
+            for k in (
+                "provider",
+                "endpoint",
+                "deployment",
+                "apiVersion",
+                "api_version",
+                "baseUrl",
+                "base_url",
+                "model",
+                "apiKey",
+                "api_key",
+                "temperature",
+                "maxTokens",
+                "max_tokens",
+            )
+        ):
+            return None
+
+        merged: dict[str, Any] = dict(base)
+
+        field_aliases = {
+            "provider": ("provider",),
+            "endpoint": ("endpoint",),
+            "deployment": ("deployment",),
+            "apiVersion": ("apiVersion", "api_version"),
+            "baseUrl": ("baseUrl", "base_url"),
+            "model": ("model",),
+            "apiKey": ("apiKey", "api_key"),
+            "temperature": ("temperature",),
+            "maxTokens": ("maxTokens", "max_tokens"),
+        }
+
+        for canonical, aliases in field_aliases.items():
+            for alias in aliases:
+                if alias in inline and inline[alias] is not None:
+                    merged[canonical] = inline[alias]
+                    break
+
+        if inline.get("headers") is not None:
+            merged["headers"] = dict(inline["headers"])
+
+        if "provider" in merged and merged["provider"] in (
+            "azure-openai",
+            "azure_openai",
+        ):
+            if "endpoint" in merged:
+                merged["endpoint"] = merged["endpoint"]
+            if "deployment" in merged:
+                merged["deployment"] = merged["deployment"]
+            if "apiVersion" in merged:
+                merged["api_version"] = merged["apiVersion"]
+        elif merged.get("provider") in ("openai-compatible", "openai_compatible"):
+            if "baseUrl" in merged:
+                merged["base_url"] = merged["baseUrl"]
+            if "model" in merged:
+                merged["model"] = merged["model"]
+
+        if "apiKey" in merged:
+            merged["api_key"] = merged["apiKey"]
+
+        return merged
+
+    def _resolve_llm_config(
+        self,
+        agent_definition: dict[str, Any],
+        step: dict[str, Any] | None = None,
+        document: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Return the fully-resolved LLM config dict for the agent.
 
-        Mirrors the precedence the factory uses: ``agent.llm.*``
-        wins, with the same ``endpoint``/``baseUrl``/``deployment``/
-        ``apiKey``/``apiVersion`` fallbacks lifted to the top of the
-        agent, and ``defaultParameters.{temperature,max_tokens}``
-        flowing through last.
+        If ``step`` and ``document`` are both provided, the per-step
+        resolution (``_resolve_step_llm_config``) runs first. When
+        it returns a config, that wins. Otherwise we fall back to
+        the legacy agent-level resolution for backward compatibility
+        with callers that haven't adopted the new document shape yet.
+
+        The legacy path mirrors the precedence the factory uses:
+        ``agent.llm.*`` wins, with the same ``endpoint``/``baseUrl``/
+        ``deployment``/``apiKey``/``apiVersion`` fallbacks lifted to
+        the top of the agent, and ``defaultParameters.{temperature,
+        max_tokens}`` flowing through last.
 
         ``apiKey`` (and its ``defaultParameters`` alias) support
         ``${ENV_VAR}`` placeholders so the secret never has to live in
@@ -1029,72 +1152,112 @@ class WorkflowExecutor:
         operators which backend was attempted when the call itself
         raises.
         """
-        llm_config = dict(agent_definition.get("llm", {}) or {})
-        if not llm_config:
-            llm_config = {
-                "provider": agent_definition.get("provider", "azure-openai"),
-                "model": agent_definition.get("model", "gpt-4o"),
-            }
-
-        llm_config.setdefault("endpoint", agent_definition.get("endpoint"))
-        llm_config.setdefault("base_url", agent_definition.get("baseUrl"))
-        llm_config.setdefault("deployment", agent_definition.get("deployment"))
-        # Track whether the agent definition explicitly named an
-        # ``apiKey`` so the ``defaultParameters`` fallback can
-        # distinguish "no key declared" from "key declared as null".
-        # ``setdefault`` already populates the key with ``None`` in
-        # both cases, which is too coarse to drive the fallback.
-        if agent_definition.get("apiKey"):
-            llm_config["api_key"] = agent_definition["apiKey"]
+        if step is not None:
+            step_config = self._resolve_step_llm_config(step, document)
+            if step_config is not None:
+                llm_config = dict(step_config)
+            else:
+                llm_config = None
         else:
-            llm_config.setdefault("api_key", None)
-        llm_config.setdefault("api_version", agent_definition.get("apiVersion"))
+            llm_config = None
 
-        default_params: dict[str, Any] = {
-            **agent_definition.get("default_parameters", {}),
-            **agent_definition.get("defaultParameters", {}),
-        }
-        for key in ("temperature", "max_tokens", "maxTokens"):
-            if key in default_params and key not in llm_config:
-                llm_config[key] = default_params[key]
+        if llm_config is None:
+            llm_config = dict(agent_definition.get("llm", {}) or {})
+            if not llm_config:
+                llm_config = {
+                    "provider": agent_definition.get("provider", "azure-openai"),
+                    "model": agent_definition.get("model", "gpt-4o"),
+                }
 
-        # ``apiKey`` is intentionally re-read from defaultParameters
-        # (and the ``api_key`` snake_case alias) so workflow authors
-        # can keep the secret out of the top-level agent definition
-        # via ``"apiKey": "${OPENAI_API_KEY}"``. Resolved through the
-        # shared env-var helper so the same ``$VAR``/``${VAR}`` syntax
-        # used in MCP headers works here too. An unresolved
-        # placeholder must NOT be passed through to the LLM factory —
-        # it would either be rejected by a real auth layer or end up
-        # in the resolved-parameter debug payload as a literal
-        # ``${OPENAI_API_KEY}`` string.
-        if not llm_config.get("api_key"):
-            default_api_key = (
-                default_params.get("apiKey") or default_params.get("api_key")
+            llm_config.setdefault("endpoint", agent_definition.get("endpoint"))
+            llm_config.setdefault("base_url", agent_definition.get("baseUrl"))
+            llm_config.setdefault("deployment", agent_definition.get("deployment"))
+            # Track whether the agent definition explicitly named an
+            # ``apiKey`` so the ``defaultParameters`` fallback can
+            # distinguish "no key declared" from "key declared as null".
+            # ``setdefault`` already populates the key with ``None`` in
+            # both cases, which is too coarse to drive the fallback.
+            # Look at both the top-level ``apiKey`` and the nested
+            # ``llm.apiKey`` so workflows that nest the LLM config
+            # under ``llm`` still resolve the key.
+            explicit_api_key = (
+                agent_definition.get("apiKey")
+                or llm_config.get("apiKey")
+                or agent_definition.get("llm", {}).get("apiKey")
             )
-            if default_api_key:
-                from src.lib.security import resolve_env_vars
+            if explicit_api_key:
+                llm_config["api_key"] = explicit_api_key
+            else:
+                llm_config.setdefault("api_key", None)
+            llm_config.setdefault("api_version", agent_definition.get("apiVersion"))
 
-                resolved = resolve_env_vars(str(default_api_key))
-                if not resolved or resolved == default_api_key:
-                    # Either the placeholder didn't resolve or the
-                    # value was already plain. Only accept the plain
-                    # value as a hardcoded override; drop unresolved
-                    # placeholders so the LLM factory can fall back
-                    # to its own settings/env-var chain instead of
-                    # shipping a literal ``${...}`` to the server.
-                    if "${" in str(default_api_key) or "{" in str(default_api_key):
-                        llm_config["api_key"] = None
+            default_params: dict[str, Any] = {
+                **agent_definition.get("default_parameters", {}),
+                **agent_definition.get("defaultParameters", {}),
+            }
+            for key in ("temperature", "max_tokens", "maxTokens"):
+                if key in default_params and key not in llm_config:
+                    llm_config[key] = default_params[key]
+
+            # ``apiKey`` is intentionally re-read from defaultParameters
+            # (and the ``api_key`` snake_case alias) so workflow authors
+            # can keep the secret out of the top-level agent definition
+            # via ``"apiKey": "${OPENAI_API_KEY}"``. Resolved through the
+            # shared env-var helper so the same ``$VAR``/``${VAR}`` syntax
+            # used in MCP headers works here too. An unresolved
+            # placeholder must NOT be passed through to the LLM factory —
+            # it would either be rejected by a real auth layer or end up
+            # in the resolved-parameter debug payload as a literal
+            # ``${OPENAI_API_KEY}`` string.
+            if not llm_config.get("api_key"):
+                default_api_key = (
+                    default_params.get("apiKey") or default_params.get("api_key")
+                )
+                if default_api_key:
+                    from src.lib.security import resolve_env_vars
+
+                    resolved = resolve_env_vars(str(default_api_key))
+                    if not resolved or resolved == default_api_key:
+                        # Either the placeholder didn't resolve or the
+                        # value was already plain. Only accept the plain
+                        # value as a hardcoded override; drop unresolved
+                        # placeholders so the LLM factory can fall back
+                        # to its own settings/env-var chain instead of
+                        # shipping a literal ``${...}`` to the server.
+                        if "${" in str(default_api_key) or "{" in str(default_api_key):
+                            llm_config["api_key"] = None
+                        else:
+                            llm_config["api_key"] = resolved
                     else:
                         llm_config["api_key"] = resolved
-                else:
-                    llm_config["api_key"] = resolved
+
+        # Resolve ``${ENV_VAR}`` placeholders in the final config so the
+        # factory never sees a literal ``${...}`` string. Same helper
+        # used by MCP headers. When the placeholder does not resolve
+        # (the env var is unset) we clear the key entirely so the
+        # factory can fall back to its own settings/env-var chain
+        # instead of shipping a literal ``${...}`` to the server.
+        from src.lib.security import resolve_env_vars
+
+        for key in ("api_key", "endpoint", "base_url", "api_version", "model"):
+            value = llm_config.get(key)
+            if not isinstance(value, str):
+                continue
+            if "${" not in value and "{" not in value:
+                continue
+            resolved = resolve_env_vars(value)
+            if resolved and resolved != value:
+                llm_config[key] = resolved
+            else:
+                llm_config[key] = None
 
         return llm_config
 
     def _build_llm_call_config(
         self,
         agent_definition: dict[str, Any],
+        step: dict[str, Any] | None = None,
+        document: dict[str, Any] | None = None,
     ) -> LLMCallConfig:
         """Build an :class:`LLMCallConfig` snapshot for diagnostics.
 
@@ -1102,8 +1265,12 @@ class WorkflowExecutor:
         when the agent definition didn't supply one), so the
         diagnostics endpoint can tell which credential was used
         without leaking the secret.
+
+        When ``step`` and ``document`` are provided, the per-step
+        resolution is used (profile + inline override). Otherwise
+        the legacy agent-level resolution applies.
         """
-        llm_config = self._resolve_llm_config(agent_definition)
+        llm_config = self._resolve_llm_config(agent_definition, step=step, document=document)
         explicit_api_key = llm_config.get("api_key")
         return LLMCallConfig(
             provider=llm_config.get("provider", "azure-openai"),
@@ -1131,6 +1298,7 @@ class WorkflowExecutor:
         *,
         progress_sink: Any | None = None,
         agent_id: str = "",
+        document: dict[str, Any] | None = None,
     ) -> tuple[str, str | None, list[AgentIterationTrace], list[AgentToolCall]]:
         """Execute a single workflow step.
 
@@ -1176,6 +1344,7 @@ class WorkflowExecutor:
                     conversation_id,
                     progress_sink=progress_sink,
                     agent_id=agent_id,
+                    document=document,
                 )
             )
             return output, new_conversation_id, iterations, tool_calls
@@ -1258,6 +1427,7 @@ class WorkflowExecutor:
         *,
         progress_sink: Any | None = None,
         agent_id: str = "",
+        document: dict[str, Any] | None = None,
     ) -> tuple[str, str | None, dict[str, Any], list[AgentIterationTrace], list[AgentToolCall]]:
         """Execute an agent step (LLM chat).
 
@@ -1302,7 +1472,7 @@ class WorkflowExecutor:
         # snapshot is built by the caller (``execute_stream``) so it
         # survives a failing LLM call; here we just consume the same
         # resolved dict to actually construct the chat model.
-        llm_config = self._resolve_llm_config(agent_definition)
+        llm_config = self._resolve_llm_config(agent_definition, step=step, document=document)
         explicit_api_key = llm_config.get("api_key")
 
         # Create LLM

@@ -83,6 +83,35 @@ export const STEP_TYPE_OPTIONS: StepType[] = [
   "resetConversation",
 ];
 
+export type LlmConfigMode = "profile" | "inline" | "inherit";
+
+export interface StepLlmFormState {
+  mode: LlmConfigMode;
+  profileId: string;
+  provider: string;
+  endpoint: string;
+  deployment: string;
+  apiVersion: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  temperature: string;
+  maxTokens: string;
+}
+export const EMPTY_STEP_LLM_FORM: StepLlmFormState = {
+  mode: "inherit",
+  profileId: "",
+  provider: "azure-openai",
+  endpoint: "",
+  deployment: "",
+  apiVersion: "",
+  baseUrl: "",
+  model: "",
+  apiKey: "",
+  temperature: "",
+  maxTokens: "",
+};
+
 export interface StepFormState {
   name: string;
   type: StepType;
@@ -90,6 +119,7 @@ export interface StepFormState {
   parameters: KeyValueEntry[];
   tools: string[];
   variableTypes?: Record<string, WorkflowVariableDataType>;
+  llmConfig: StepLlmFormState;
 }
 
 export interface OutcomeFormState {
@@ -136,10 +166,6 @@ export interface WorkflowFormState {
   id: string;
   name: string;
   description: string;
-  endpoint: string;
-  deployment: string;
-  apiKey: string;
-  apiVersion: string;
   defaultParameters: KeyValueEntry[];
   streamingEnabled: boolean;
   streamingMode: string;

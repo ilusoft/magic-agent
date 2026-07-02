@@ -186,7 +186,7 @@ export function useAgentDefinitionsDocument({
 
     try {
       const response = await fetch(
-        `${apiBaseUrl}/api/agents/definitions`,
+        `${apiBaseUrl}/api/agent-definitions`,
         {
           method: "PUT",
           headers: {

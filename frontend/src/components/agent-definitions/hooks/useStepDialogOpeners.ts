@@ -4,7 +4,13 @@ import type {
   AgentDefinition,
   AgentDefinitionsDocument,
 } from "@/types/agents";
-import type { StepFormState, StepType, WorkflowNode } from "@/components/agent-definitions/types";
+import {
+  EMPTY_STEP_LLM_FORM,
+  type StepFormState,
+  type StepLlmFormState,
+  type StepType,
+  type WorkflowNode,
+} from "@/components/agent-definitions/types";
 import { entriesFromRecord } from "@/components/agent-definitions/util";
 import { coerceStepType, ensureParametersForStepType } from "@/components/agent-definitions/hooks/useStepForm";
 
@@ -83,6 +89,7 @@ export function useStepDialogOpeners({
         parameters: ensuredEntries,
         tools: selectedTools,
         variableTypes: existingStep?.variableTypes,
+        llmConfig: buildLlmFormState(existingStep?.llmConfig),
       });
       setStepFormError(null);
       setStepOriginalName(existingStep?.name ?? targetStepName ?? null);
@@ -107,6 +114,7 @@ export function useStepDialogOpeners({
         conversationEnabled: false,
         parameters: ensureParametersForStepType(initialType, []),
         tools: [],
+        llmConfig: buildLlmFormState(undefined),
       });
       setStepFormError(null);
       setStepOriginalName(null);
@@ -142,4 +150,49 @@ export function useStepDialogOpeners({
     openForVariableCreation,
     openForResetCreation,
   };
+}
+
+function buildLlmFormState(
+  llmConfig: AgentDefinition["steps"][number]["llmConfig"]
+): StepLlmFormState {
+  if (!llmConfig) {
+    return { ...(EMPTY_STEP_LLM_FORM as StepLlmFormState) };
+  }
+
+  const mode = llmConfig.profileId
+    ? "profile"
+    : hasAnyInlineField(llmConfig)
+    ? "inline"
+    : "inherit";
+
+  return {
+    mode,
+    profileId: llmConfig.profileId ?? "",
+    provider: llmConfig.provider ?? "azure-openai",
+    endpoint: llmConfig.endpoint ?? "",
+    deployment: llmConfig.deployment ?? "",
+    apiVersion: llmConfig.apiVersion ?? "",
+    baseUrl: llmConfig.baseUrl ?? "",
+    model: llmConfig.model ?? "",
+    apiKey: llmConfig.apiKey ?? "",
+    temperature: llmConfig.temperature?.toString() ?? "",
+    maxTokens: llmConfig.maxTokens?.toString() ?? "",
+  };
+}
+
+function hasAnyInlineField(
+  llmConfig: NonNullable<AgentDefinition["steps"][number]["llmConfig"]>
+): boolean {
+  return Boolean(
+    llmConfig.provider ||
+      llmConfig.endpoint ||
+      llmConfig.deployment ||
+      llmConfig.apiVersion ||
+      llmConfig.baseUrl ||
+      llmConfig.model ||
+      llmConfig.apiKey ||
+      llmConfig.headers ||
+      llmConfig.temperature !== undefined ||
+      llmConfig.maxTokens !== undefined
+  );
 }
